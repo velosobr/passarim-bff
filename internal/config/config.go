@@ -53,9 +53,12 @@ func Load(getenv func(string) string) (Config, error) {
 		OTelEndpoint:         getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 		OTelServiceName:      or(getenv("OTEL_SERVICE_NAME"), "passarim-bff"),
 	}
-	for name, v := range map[string]string{"CATALOG_ADDR": c.CatalogAddr, "REDIS_URL": c.RedisURL, "MEDIA_BASE_URL": c.MediaBaseURL} {
-		if v == "" {
-			return c, errors.New(name + " é obrigatória")
+	// Slice (e não map): a ordem de conferência é fixa, então o erro é reproduzível.
+	for _, req := range []struct{ name, value string }{
+		{"CATALOG_ADDR", c.CatalogAddr}, {"REDIS_URL", c.RedisURL}, {"MEDIA_BASE_URL", c.MediaBaseURL},
+	} {
+		if req.value == "" {
+			return c, errors.New(req.name + " é obrigatória")
 		}
 	}
 	var err error

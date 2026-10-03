@@ -88,3 +88,14 @@ func TestLoad_ErrorNeverContainsValues(t *testing.T) {
 		t.Fatalf("o erro não pode conter o valor: %v", err)
 	}
 }
+
+// A ordem em que as obrigatórias são conferidas é fixa (CATALOG_ADDR, REDIS_URL, MEDIA_BASE_URL):
+// o erro precisa ser reproduzível, não depender da ordem de iteração de um map.
+func TestLoad_MissingRequiredReportsInFixedOrder(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		_, err := config.Load(env(map[string]string{}))
+		if err == nil || !strings.Contains(err.Error(), "CATALOG_ADDR") {
+			t.Fatalf("o primeiro erro deveria citar CATALOG_ADDR, veio %v", err)
+		}
+	}
+}
