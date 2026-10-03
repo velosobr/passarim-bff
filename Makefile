@@ -10,7 +10,7 @@ lint:
 
 # Teste ponta a ponta com o catalog real. Só local: constrói o catalog de ../passarim-catalog.
 e2e:
-	PASSARIM_CATALOG_DIR=../passarim-catalog go test -race -tags e2e ./e2e/...
+	PASSARIM_CATALOG_DIR=$(abspath ../passarim-catalog) go test -race -tags e2e ./e2e/...
 
 # Roda o BFF local apontando para o catalog e o Redis do docker compose (portas do host).
 run:

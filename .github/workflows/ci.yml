@@ -12,7 +12,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # -race detecta acesso concorrente perigoso. Os testes do cache usam Redis via Docker
+      # (já instalado nos runners). Inclui o teste de contrato contra o openapi.yaml.
       - run: go test -race ./...
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   lint:
     runs-on: ubuntu-latest
@@ -21,6 +25,26 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # golangci-lint inclui o gosec (segurança) configurado em .golangci.yml.
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.14.0
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: build da imagem
+        run: docker build -t passarim-bff:ci .
+      # Trivy falha em vulnerabilidade ALTA/CRÍTICA com correção disponível.
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: passarim-bff:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
