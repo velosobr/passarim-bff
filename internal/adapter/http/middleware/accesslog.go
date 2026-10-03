@@ -35,8 +35,18 @@ func AccessLog(log *slog.Logger, ip IPResolver, obs Observer) Middleware {
 				"cache", reqmeta.From(r.Context()).Cache(), "client_ip", ip(r))
 			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("cache", reqmeta.From(r.Context()).Cache()))
 			if obs != nil {
-				obs.ObserveHTTP(route, r.Method, rec.Status(), d)
+				obs.ObserveHTTP(route, MethodLabel(r.Method), rec.Status(), d)
 			}
 		})
 	}
+}
+
+// MethodLabel limita os valores do rótulo "method" nas métricas e nos spans: o servidor
+// aceita qualquer token como método, e cada valor novo criaria séries novas para sempre.
+func MethodLabel(m string) string {
+	switch m {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions:
+		return m
+	}
+	return "OTHER"
 }

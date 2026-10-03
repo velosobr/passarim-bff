@@ -187,3 +187,21 @@ func TestAccessLog_SetsCacheAttributeOnSpan(t *testing.T) {
 		t.Fatalf("o span HTTP deveria ter o atributo cache=stale, tem %q", got)
 	}
 }
+
+// Método inventado pelo cliente não pode virar rótulo de métrica (cardinalidade ilimitada).
+func TestAccessLog_UnknownMethodIsObservedAsOther(t *testing.T) {
+	obs := &recObserver{}
+	h := middleware.Chain(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+		middleware.RequestID(), middleware.AccessLog(discard, func(*http.Request) string { return "1.1.1.1" }, obs))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("FOO123", "/x", nil))
+	if obs.method != "OTHER" {
+		t.Fatalf("método desconhecido deveria virar OTHER, veio %q", obs.method)
+	}
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("HEAD", "/x", nil))
+	if obs.method != "HEAD" {
+		t.Fatalf("HEAD continua HEAD, veio %q", obs.method)
+	}
+	if got := middleware.MethodLabel("POST"); got != "POST" {
+		t.Fatalf("métodos HTTP padrão são mantidos: %q", got)
+	}
+}

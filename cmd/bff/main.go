@@ -115,7 +115,7 @@ func run(getenv func(string) string) error {
 	handler := middleware.Chain(h.Routes(),
 		middleware.Recovery(log), middleware.RequestID(), middleware.AccessLog(log, clientIP, prom),
 		middleware.SecurityHeaders(), limiter.Middleware(), middleware.Limits())
-	handler = otelhttp.NewHandler(handler, "bff", otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string { return "HTTP " + r.Method }))
+	handler = otelhttp.NewHandler(handler, "bff", otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string { return "HTTP " + middleware.MethodLabel(r.Method) }))
 
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("GET /metrics", prom.Handler())
