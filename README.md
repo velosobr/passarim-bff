@@ -33,6 +33,7 @@ decorator sobre a porta `usecase.CatalogReader`, testável com um `CatalogReader
 | `make test` | testes unitários, de contrato (`openapi.yaml`) e de integração com Redis (precisa de Docker) |
 | `make lint` | `golangci-lint` (inclui gosec) |
 | `make e2e` | teste ponta a ponta com o catalog real (só local; constrói o catalog de `../passarim-catalog`) |
+| `make swagger` | gera `docs/swagger.html` (Swagger UI) a partir do `openapi.yaml`; abra no navegador |
 | `make run` | roda o BFF local contra o catalog e o Redis do `docker compose` do `passarim-docs` |
 
 ## Contrato e design

@@ -1,5 +1,5 @@
-# Atalhos do dia a dia. Uso: make test | make lint | make e2e | make run
-.PHONY: test lint e2e run
+# Atalhos do dia a dia. Uso: make test | make lint | make e2e | make run | make swagger
+.PHONY: test lint e2e run swagger
 
 # Testes unitários, de contrato e de integração com Redis (testcontainers: precisa de Docker).
 test:
@@ -15,3 +15,7 @@ e2e:
 # Roda o BFF local apontando para o catalog e o Redis do docker compose (portas do host).
 run:
 	CATALOG_ADDR=localhost:50051 REDIS_URL=redis://localhost:6379 MEDIA_BASE_URL=http://localhost:8888/buckets/passarim-media go run ./cmd/bff
+
+# Gera docs/swagger.html (Swagger UI) a partir do openapi.yaml. Rode depois de mudar o contrato.
+swagger:
+	go run ./tools/swagger
