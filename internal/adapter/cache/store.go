@@ -43,3 +43,18 @@ func (s *RedisStore) Set(ctx context.Context, key string, value []byte, ttl time
 	defer cancel()
 	return s.c.Set(ctx, key, value, ttl).Err()
 }
+
+// NewRedisClient cria o cliente go-redis com TODOS os prazos presos ao REDIS_TIMEOUT.
+// O go-redis tem DialTimeout de 5 s e o handshake da conexão não obedece ao prazo do
+// contexto: sem isto, um Redis que aceita a conexão e não responde prenderia cada
+// requisição por 5 s, estourando o orçamento de 3 s. A URL pode ter senha, então o
+// erro nunca a repete.
+func NewRedisClient(url string, timeout time.Duration) (*redis.Client, error) {
+	opt, err := redis.ParseURL(url)
+	if err != nil {
+		return nil, errors.New("REDIS_URL: URL inválida (ex.: redis://redis:6379)")
+	}
+	opt.MaxRetries = -1 // sem retries internos: o cache falha rápido e segue como miss
+	opt.DialTimeout, opt.ReadTimeout, opt.WriteTimeout = timeout, timeout, timeout
+	return redis.NewClient(opt), nil
+}

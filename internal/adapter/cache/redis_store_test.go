@@ -26,12 +26,10 @@ func startRedis(t *testing.T) (*redis.Client, *tcredis.RedisContainer) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opt, err := redis.ParseURL(uri)
+	c, err := cache.NewRedisClient(uri, 200*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
-	opt.MaxRetries = -1 // -1 desliga os retries internos do go-redis: erro rápido quando o Redis cai
-	c := redis.NewClient(opt)
 	t.Cleanup(func() { _ = c.Close() })
 	return c, ctr
 }

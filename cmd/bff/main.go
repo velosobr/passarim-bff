@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"google.golang.org/grpc"
@@ -71,13 +69,11 @@ func run(getenv func(string) string) error {
 	}
 	prom := metrics.NewProm()
 
-	// Redis: a URL pode ter senha, então o erro nunca a repete.
-	redisOpt, err := redis.ParseURL(cfg.RedisURL)
+	// Redis: todos os prazos do cliente seguem o REDIS_TIMEOUT (ver cache.NewRedisClient).
+	redisClient, err := cache.NewRedisClient(cfg.RedisURL, cfg.RedisTimeout)
 	if err != nil {
-		return errors.New("REDIS_URL: URL inválida (ex.: redis://redis:6379)")
+		return err
 	}
-	redisOpt.MaxRetries = -1 // sem retries internos: o cache tem timeout próprio e falha rápido
-	redisClient := redis.NewClient(redisOpt)
 
 	grpcClient, err := grpcclient.New(grpcclient.Config{
 		Addr: cfg.CatalogAddr, Logger: log,
