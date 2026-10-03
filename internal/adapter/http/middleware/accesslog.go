@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"log/slog"
 	"net/http"
 	"time"
@@ -31,6 +33,7 @@ func AccessLog(log *slog.Logger, ip IPResolver, obs Observer) Middleware {
 				"request_id", reqmeta.RequestID(r.Context()), "method", r.Method, "route", route,
 				"status", rec.Status(), "duration_ms", float64(d.Microseconds())/1000,
 				"cache", reqmeta.From(r.Context()).Cache(), "client_ip", ip(r))
+			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("cache", reqmeta.From(r.Context()).Cache()))
 			if obs != nil {
 				obs.ObserveHTTP(route, r.Method, rec.Status(), d)
 			}

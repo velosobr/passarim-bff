@@ -31,7 +31,8 @@ type Handler struct {
 	Filters  FiltersLister
 	Media    *media.Builder
 	Log      *slog.Logger
-	patterns []string // padrões registrados em Routes(), para o teste de contrato
+	Ready    func() bool // nil = sempre pronto (false durante o shutdown)
+	patterns []string    // padrões registrados em Routes(), para o teste de contrato
 }
 
 // Patterns devolve os padrões registrados ("GET /v1/species"...), sem o "/" do 404.
@@ -50,6 +51,8 @@ func (h *Handler) Routes() http.Handler {
 	reg("GET /v1/species", h.listSpecies)
 	reg("GET /v1/species/{id}", h.getSpecies)
 	reg("GET /v1/filters", h.listFilters)
+	reg("GET /healthz", h.healthz)
+	reg("GET /readyz", h.readyz)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { // 404 genérico em problem+json
 		WriteProblem(w, r, http.StatusNotFound, CodeNotFound, nil)
 	})

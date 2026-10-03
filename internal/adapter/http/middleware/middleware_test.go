@@ -2,8 +2,11 @@ package middleware_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -162,5 +165,25 @@ func TestChain_FirstIsOutermost(t *testing.T) {
 		ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 	if strings.Join(order, ",") != "a,b,handler" {
 		t.Fatalf("ordem: %v", order)
+	}
+}
+
+func TestAccessLog_SetsCacheAttributeOnSpan(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	ctx, span := tp.Tracer("t").Start(context.Background(), "http")
+	h := middleware.Chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqmeta.From(r.Context()).SetCache("stale")
+	}), middleware.RequestID(), middleware.AccessLog(discard, func(*http.Request) string { return "1.1.1.1" }, nil))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/x", nil).WithContext(ctx))
+	span.End()
+	var got string
+	for _, a := range sr.Ended()[0].Attributes() {
+		if a.Key == "cache" {
+			got = a.Value.AsString()
+		}
+	}
+	if got != "stale" {
+		t.Fatalf("o span HTTP deveria ter o atributo cache=stale, tem %q", got)
 	}
 }
