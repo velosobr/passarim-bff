@@ -1,0 +1,13 @@
+# golangci-lint roda dezenas de verificadores de uma vez.
+version: "2"
+linters:
+  enable:
+    - gosec      # problemas de segurança (OWASP)
+    - errorlint  # uso correto de errors.Is/As
+    - bodyclose  # respostas HTTP fechadas
+    - misspell
+  settings:
+    misspell:
+      # O código é comentado em português; estas palavras são portuguesas
+      # legítimas que o misspell confunde com erros de inglês.
+      ignore-rules: [variantes, argumentos, problemas, exponencial, convers, candidatas, autor, persistente, eles]
