@@ -26,22 +26,31 @@ type FiltersLister interface {
 }
 
 type Handler struct {
-	List    SpeciesLister
-	Get     SpeciesGetter
-	Filters FiltersLister
-	Media   *media.Builder
-	Log     *slog.Logger
+	List     SpeciesLister
+	Get      SpeciesGetter
+	Filters  FiltersLister
+	Media    *media.Builder
+	Log      *slog.Logger
+	patterns []string // padrões registrados em Routes(), para o teste de contrato
 }
+
+// Patterns devolve os padrões registrados ("GET /v1/species"...), sem o "/" do 404.
+func (h *Handler) Patterns() []string { return h.patterns }
 
 // Routes monta o roteador da stdlib (Go 1.22+: padrões com método e {id}).
 // O "/" no fim captura rota inexistente para responder 404 em problem+json
 // (o mux padrão responderia texto puro).
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/species", h.listSpecies)
-	mux.HandleFunc("GET /v1/species/{id}", h.getSpecies)
-	mux.HandleFunc("GET /v1/filters", h.listFilters)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	h.patterns = nil
+	reg := func(pattern string, f http.HandlerFunc) {
+		mux.HandleFunc(pattern, f)
+		h.patterns = append(h.patterns, pattern)
+	}
+	reg("GET /v1/species", h.listSpecies)
+	reg("GET /v1/species/{id}", h.getSpecies)
+	reg("GET /v1/filters", h.listFilters)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { // 404 genérico em problem+json
 		WriteProblem(w, r, http.StatusNotFound, CodeNotFound, nil)
 	})
 	return mux

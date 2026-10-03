@@ -1,0 +1,361 @@
+openapi: 3.0.3
+info:
+  title: Passarim BFF
+  version: 1.0.0
+  description: |
+    API REST do Passarim (catálogo de aves do Brasil). Somente leitura.
+    Erros seguem o RFC 9457 (`application/problem+json`) com um `code` estável.
+servers:
+  - url: /
+tags:
+  - name: catalog
+    description: Catálogo de aves
+  - name: operational
+    description: Saúde do serviço (não passam pelo balanceador público)
+paths:
+  /v1/species:
+    get:
+      tags: [catalog]
+      operationId: listSpecies
+      summary: Lista de espécies (tela Explorar)
+      description: Busca e filtros. Uma busca com `q` nunca é cacheada no servidor.
+      parameters:
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/Biome'
+        - $ref: '#/components/parameters/State'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de espécies
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/XRequestId' }
+            X-Cache: { $ref: '#/components/headers/XCache' }
+            Cache-Control: { $ref: '#/components/headers/CacheControl' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeciesPage' }
+        '400': { $ref: '#/components/responses/InvalidParameter' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/Internal' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/species/{id}:
+    get:
+      tags: [catalog]
+      operationId: getSpecies
+      summary: Detalhe de uma espécie
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z0-9-]{1,80}$' }
+      responses:
+        '200':
+          description: Espécie completa
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/XRequestId' }
+            X-Cache: { $ref: '#/components/headers/XCache' }
+            Cache-Control: { $ref: '#/components/headers/CacheControl' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Species' }
+        '400': { $ref: '#/components/responses/InvalidParameter' }
+        '404': { $ref: '#/components/responses/SpeciesNotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/Internal' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/filters:
+    get:
+      tags: [catalog]
+      operationId: listFilters
+      summary: Biomas e estados com contagem de espécies
+      responses:
+        '200':
+          description: Filtros disponíveis (os `code` valem como `biome` e `state` na lista)
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/XRequestId' }
+            X-Cache: { $ref: '#/components/headers/XCache' }
+            Cache-Control: { $ref: '#/components/headers/CacheControl' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Filters' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/Internal' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /healthz:
+    get:
+      tags: [operational]
+      operationId: healthz
+      summary: Liveness (o processo está vivo)
+      responses:
+        '200':
+          description: Vivo
+          content:
+            text/plain:
+              schema: { type: string }
+  /readyz:
+    get:
+      tags: [operational]
+      operationId: readyz
+      summary: Readiness (usado pelo Traefik; não depende do catalog nem do Redis)
+      responses:
+        '200':
+          description: Pronto
+          content:
+            text/plain:
+              schema: { type: string }
+        '503':
+          description: Em desligamento
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  parameters:
+    Q:
+      name: q
+      in: query
+      description: Busca por nome popular ou científico (até 100 caracteres).
+      schema: { type: string, maxLength: 100 }
+    Biome:
+      name: biome
+      in: query
+      schema: { $ref: '#/components/schemas/BiomeCode' }
+    State:
+      name: state
+      in: query
+      description: UF (aceita minúsculas; a resposta usa sempre maiúsculas).
+      schema: { $ref: '#/components/schemas/StateCode' }
+    Cursor:
+      name: cursor
+      in: query
+      description: Cursor opaco devolvido em `nextCursor`.
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,512}$' }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+  headers:
+    XRequestId:
+      description: Identificador da requisição (o mesmo que aparece nos logs).
+      schema: { type: string }
+    XCache:
+      description: Origem do dado.
+      schema: { type: string, enum: [hit, miss, stale] }
+    CacheControl:
+      schema: { type: string }
+  responses:
+    InvalidParameter:
+      description: Parâmetro inválido
+      headers:
+        X-Request-Id: { $ref: '#/components/headers/XRequestId' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    SpeciesNotFound:
+      description: Espécie inexistente (`SPECIES_NOT_FOUND`)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Rota inexistente (`NOT_FOUND`)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    MethodNotAllowed:
+      description: Só GET e HEAD (`METHOD_NOT_ALLOWED`)
+      headers:
+        Allow:
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    RateLimited:
+      description: Muitas requisições (`RATE_LIMITED`)
+      headers:
+        Retry-After:
+          schema: { type: string }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Internal:
+      description: Erro interno (`INTERNAL`); sem detalhes técnicos
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ServiceUnavailable:
+      description: Catalog indisponível e sem dado em cache (`SERVICE_UNAVAILABLE`)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    BiomeCode:
+      type: string
+      enum: [amazonia, mata_atlantica, cerrado, caatinga, pantanal, pampa]
+    StateCode:
+      type: string
+      enum: [AC, AL, AP, AM, BA, CE, DF, ES, GO, MA, MT, MS, MG, PA, PB, PR, PE, PI, RJ, RN, RS, RO, RR, SC, SP, SE, TO]
+    Label:
+      type: object
+      required: [code, label]
+      properties:
+        code: { type: string }
+        label: { type: string }
+    ConservationStatus:
+      type: object
+      required: [code, label]
+      properties:
+        code: { type: string, enum: [LC, NT, VU, EN, CR, EW, EX, DD] }
+        label: { type: string }
+    Credit:
+      type: object
+      required: [author, license, source, sourceUrl]
+      properties:
+        author: { type: string }
+        license: { type: string }
+        source: { type: string }
+        sourceUrl: { type: string }
+    SpeciesSummary:
+      type: object
+      required: [id, commonName, scientificName, thumbnailUrl, conservationStatus]
+      properties:
+        id: { type: string }
+        commonName: { type: string }
+        scientificName: { type: string }
+        thumbnailUrl: { type: string, nullable: true }
+        conservationStatus:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ConservationStatus'
+    SpeciesPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SpeciesSummary' }
+        nextCursor: { type: string, nullable: true }
+    Fact:
+      type: object
+      required: [text, source]
+      properties:
+        text: { type: string }
+        source: { type: string }
+    Photo:
+      type: object
+      required: [thumbUrl, mediumUrl, largeUrl, width, height, credit]
+      properties:
+        thumbUrl: { type: string, nullable: true }
+        mediumUrl: { type: string, nullable: true }
+        largeUrl: { type: string, nullable: true }
+        width: { type: integer }
+        height: { type: integer }
+        credit: { $ref: '#/components/schemas/Credit' }
+    Audio:
+      type: object
+      required: [url, durationMs, credit]
+      properties:
+        url: { type: string }
+        durationMs: { type: integer }
+        credit: { $ref: '#/components/schemas/Credit' }
+    Cluster:
+      type: object
+      required: [lat, lng, count, precision]
+      properties:
+        lat: { type: number }
+        lng: { type: number }
+        count: { type: integer }
+        precision: { type: number }
+    WhereToFind:
+      type: object
+      required: [states, biomes, clusters]
+      properties:
+        states:
+          type: array
+          items: { $ref: '#/components/schemas/StateCode' }
+        biomes:
+          type: array
+          items: { $ref: '#/components/schemas/BiomeCode' }
+        clusters:
+          type: array
+          items: { $ref: '#/components/schemas/Cluster' }
+    Species:
+      type: object
+      required: [id, commonName, scientificName, family, conservationStatus, sizeCm, diet, description, descriptionCredit, facts, chips, photos, audio, whereToFind]
+      properties:
+        id: { type: string }
+        commonName: { type: string }
+        scientificName: { type: string }
+        family: { type: string }
+        conservationStatus:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ConservationStatus'
+        sizeCm: { type: integer, nullable: true }
+        diet: { type: string, nullable: true, description: Texto livre (não é uma categoria rotulada). }
+        description: { type: string }
+        descriptionCredit: { $ref: '#/components/schemas/Credit' }
+        facts:
+          type: array
+          items: { $ref: '#/components/schemas/Fact' }
+        chips:
+          type: array
+          description: Biomas da espécie, rotulados em português.
+          items: { $ref: '#/components/schemas/Label' }
+        photos:
+          type: array
+          description: A primeira é a principal.
+          items: { $ref: '#/components/schemas/Photo' }
+        audio:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Audio'
+        whereToFind: { $ref: '#/components/schemas/WhereToFind' }
+    BiomeCount:
+      type: object
+      required: [code, label, speciesCount]
+      properties:
+        code: { $ref: '#/components/schemas/BiomeCode' }
+        label: { type: string }
+        speciesCount: { type: integer }
+    StateCount:
+      type: object
+      required: [code, speciesCount]
+      properties:
+        code: { $ref: '#/components/schemas/StateCode' }
+        speciesCount: { type: integer }
+    Filters:
+      type: object
+      required: [biomes, states]
+      properties:
+        biomes:
+          type: array
+          items: { $ref: '#/components/schemas/BiomeCount' }
+        states:
+          type: array
+          items: { $ref: '#/components/schemas/StateCount' }
+    FieldError:
+      type: object
+      required: [field, reason]
+      properties:
+        field: { type: string }
+        reason: { type: string }
+    Problem:
+      type: object
+      description: Erro no formato do RFC 9457.
+      required: [type, title, status, code, requestId]
+      properties:
+        type: { type: string, example: 'urn:passarim:problem:species-not-found' }
+        title: { type: string }
+        status: { type: integer }
+        code:
+          type: string
+          enum: [INVALID_PARAMETER, SPECIES_NOT_FOUND, NOT_FOUND, METHOD_NOT_ALLOWED, RATE_LIMITED, SERVICE_UNAVAILABLE, INTERNAL]
+        requestId: { type: string }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/FieldError' }
