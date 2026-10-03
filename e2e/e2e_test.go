@@ -30,7 +30,7 @@ func catalogDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(abs, "Dockerfile")); err != nil {
+	if _, err := os.Stat(filepath.Join(abs, "Dockerfile")); err != nil { //nolint:gosec // caminho vem de variável de ambiente do desenvolvedor
 		t.Skipf("catalog não encontrado em %s (defina PASSARIM_CATALOG_DIR)", abs)
 	}
 	return abs
@@ -84,7 +84,7 @@ func TestE2E_BFFWithRealCatalog(t *testing.T) {
 		Env:        map[string]string{"POSTGRES_USER": "p", "POSTGRES_PASSWORD": "p", "POSTGRES_DB": "p"},
 		WaitingFor: wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(60 * time.Second),
 	})
-	dbURL := "postgres://p:p@postgres:5432/p?sslmode=disable"
+	dbURL := "postgres://p:p@postgres:5432/p?sslmode=disable" //nolint:gosec // credencial descartável do container de teste
 	catalogReq := testcontainers.ContainerRequest{
 		Name: "e2e-catalog", Networks: nets, NetworkAliases: map[string][]string{net.Name: {"catalog"}},
 		FromDockerfile: testcontainers.FromDockerfile{Context: catalogDir(t), Dockerfile: "Dockerfile"},
