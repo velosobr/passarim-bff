@@ -1,4 +1,4 @@
-// Comando swagger gera docs/swagger.html (Swagger UI com a especificação embutida) a partir
+// O programa swagger gera docs/swagger.html (Swagger UI com a especificação embutida) a partir
 // do openapi.yaml, que é a fonte do contrato. Uso: make swagger
 package main
 
@@ -41,6 +41,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	js := strings.ReplaceAll(string(b), "</", `<\/`) // nunca fecha o <script> por acidente
+	js := strings.ReplaceAll(string(b), "</", `<\/`)                               // nunca fecha o <script> por acidente
 	return os.WriteFile("docs/swagger.html", []byte(fmt.Sprintf(page, js)), 0o644) //nolint:gosec // arquivo de documentação público
 }
