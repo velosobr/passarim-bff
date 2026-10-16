@@ -10,6 +10,7 @@
 // separada por valores, como route="/v1/species" e status="200". Cada
 // combinação de rótulos é uma série guardada pelo Prometheus, por isso os
 // rótulos nunca levam dado livre do usuário (o que criaria séries sem fim).
+
 package metrics
 
 import (

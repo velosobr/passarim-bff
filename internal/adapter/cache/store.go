@@ -1,5 +1,6 @@
 // Onde os bytes do cache ficam guardados: a interface Store e a
 // implementação com Redis.
+
 package cache
 
 import (

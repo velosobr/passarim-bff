@@ -1,5 +1,6 @@
 // Testes do circuit breaker: quando ele abre, quais erros contam, como ele
 // volta a fechar e o Kind que ele devolve quando está aberto.
+
 package resilience_test
 
 import (

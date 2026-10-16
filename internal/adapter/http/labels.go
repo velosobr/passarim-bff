@@ -1,5 +1,6 @@
 // Rótulos em português de biomas e de status de conservação, mandados junto
 // com os códigos nas respostas.
+
 package httpadapter
 
 import "github.com/velosobr/passarim-bff/internal/domain"

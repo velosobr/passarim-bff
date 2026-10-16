@@ -1,5 +1,6 @@
 // Testes do handler HTTP com casos de uso falsos: formato das respostas,
 // null contra [], cabeçalhos e a tradução de cada tipo de erro em status.
+
 package httpadapter_test
 
 import (

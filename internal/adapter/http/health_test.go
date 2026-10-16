@@ -1,5 +1,6 @@
 // Testes das rotas de saúde: o healthz responde sempre e o readyz só depende
 // do desligamento.
+
 package httpadapter_test
 
 import (

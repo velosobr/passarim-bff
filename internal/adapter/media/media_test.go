@@ -1,5 +1,6 @@
 // Testes da montagem de URLs de mídia, inclusive a recusa de chaves
 // perigosas.
+
 package media_test
 
 import (

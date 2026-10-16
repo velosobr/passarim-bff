@@ -1,6 +1,7 @@
 // Peças falsas dos testes do cache: um Store em memória, um catalog que
 // conta chamadas e pode ficar "travado", um relógio controlável e um
 // registro de métricas.
+
 package cache_test
 
 import (

@@ -1,5 +1,6 @@
 // Testes de integração do RedisStore com um Redis de verdade, que roda num
 // container Docker criado pelo próprio teste.
+
 package cache_test
 
 import (

@@ -1,5 +1,6 @@
 // Chaves do Redis. Toda chave começa com o prefixo de versão, seguido do tipo
 // de dado: "bff:v1:species:<id>", "bff:v1:filters" e "bff:v1:list:<hash>".
+
 package cache
 
 import (

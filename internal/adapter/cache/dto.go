@@ -1,4 +1,5 @@
 // DTOs do cache e as conversões entre eles e o domínio.
+
 package cache
 
 import "github.com/velosobr/passarim-bff/internal/domain"

@@ -1,5 +1,6 @@
 // Testes da classificação de erros: a tabela de decisões de cada Kind e a
 // descoberta do Kind a partir de qualquer erro.
+
 package domain_test
 
 import (

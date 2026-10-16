@@ -1,6 +1,7 @@
 // Testes do decorator de cache, com peças falsas (fakes_test.go): fresco e
 // velho, quando servir o dado velho, a busca fora do cache, as chaves, o
 // Redis fora do ar e o singleflight com chamadores concorrentes.
+
 package cache_test
 
 import (

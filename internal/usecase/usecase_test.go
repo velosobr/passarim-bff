@@ -1,6 +1,7 @@
 // Testes dos casos de uso, com um catalog falso no lugar do real. Eles
 // conferem três coisas: a validação barra a entrada ruim antes do catalog, a
 // consulta chega normalizada e o orçamento de tempo está no contexto.
+
 package usecase_test
 
 import (

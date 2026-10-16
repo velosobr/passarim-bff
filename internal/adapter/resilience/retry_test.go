@@ -1,5 +1,6 @@
 // Testes do retry, com relógio, espera e sorteio falsos: o teste roda
 // instantâneo e cada valor de tempo é previsível.
+
 package resilience_test
 
 import (

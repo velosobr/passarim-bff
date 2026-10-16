@@ -1,5 +1,6 @@
 // Testes do Setup do OpenTelemetry: desligado sem endpoint, preguiçoso com
 // endpoint e com erro para endpoint inválido.
+
 package telemetry_test
 
 import (

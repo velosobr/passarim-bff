@@ -11,6 +11,7 @@
 //     (MaxRequests); se derem certo, fecha; se falharem, abre de novo.
 //
 // Usamos a biblioteca gobreaker, da Sony.
+
 package resilience
 
 import (

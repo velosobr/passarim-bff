@@ -1,4 +1,5 @@
 // Caso de uso da tela de detalhe: buscar uma espécie pelo id.
+
 package usecase
 
 import (

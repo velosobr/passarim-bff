@@ -1,5 +1,6 @@
 // As rotas de saúde, usadas pelo Docker e pelo Traefik para saber se o BFF
 // está vivo e se pode receber tráfego.
+
 package httpadapter
 
 import "net/http"

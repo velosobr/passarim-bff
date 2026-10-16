@@ -1,5 +1,6 @@
 // Respostas de erro no formato problem+json (RFC 9457), com códigos estáveis
 // que o app usa para escolher a tela de erro.
+
 package httpadapter
 
 import (

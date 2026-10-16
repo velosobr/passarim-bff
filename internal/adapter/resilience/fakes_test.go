@@ -1,5 +1,6 @@
 // Peças falsas dos testes de resiliência: um catalog "roteirizado", que
 // devolve erros numa ordem combinada, e um registro de métricas.
+
 package resilience_test
 
 import (

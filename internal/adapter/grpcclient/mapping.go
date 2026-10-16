@@ -1,5 +1,6 @@
 // Conversão das mensagens do proto nos tipos do domínio, e dos códigos de
 // erro do gRPC nos Kinds do domínio.
+
 package grpcclient
 
 import (

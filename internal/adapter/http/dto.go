@@ -1,4 +1,5 @@
 // DTOs da API REST e as conversões do domínio para eles.
+
 package httpadapter
 
 import (

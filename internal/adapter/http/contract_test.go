@@ -1,6 +1,7 @@
 // Testes de contrato: respostas reais da pilha HTTP completa são conferidas
 // contra o openapi.yaml, com a biblioteca kin-openapi. Se o código e o
 // documento do contrato divergirem, a CI quebra.
+
 package httpadapter_test
 
 import (

@@ -1,5 +1,6 @@
 // Testes das métricas do Prometheus: cada evento vira a linha certa no
 // /metrics, com os nomes e os rótulos esperados pelos painéis do Grafana.
+
 package metrics_test
 
 import (

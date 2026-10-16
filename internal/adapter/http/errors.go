@@ -1,4 +1,5 @@
 // Tradução dos erros classificados (Kind) em respostas HTTP.
+
 package httpadapter
 
 import (

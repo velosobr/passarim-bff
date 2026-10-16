@@ -1,4 +1,5 @@
 // Caso de uso da tela Explorar: a lista paginada, com busca e filtros.
+
 package usecase
 
 import (

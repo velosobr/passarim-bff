@@ -1,5 +1,6 @@
 // Credenciais de transporte da conexão gRPC com o catalog: sem criptografia
 // na rede privada local, TLS ou mTLS quando configurados.
+
 package grpcclient
 
 import (

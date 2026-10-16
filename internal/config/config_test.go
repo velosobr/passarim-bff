@@ -4,6 +4,7 @@
 // O pacote config_test (com o sufixo _test) é um pacote separado: ele só
 // enxerga o que o config exporta, como qualquer outro usuário do pacote. Isso
 // garante que testamos a API pública, e não detalhes internos.
+
 package config_test
 
 import (

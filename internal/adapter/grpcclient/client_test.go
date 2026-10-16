@@ -2,6 +2,7 @@
 // conferem a tradução proto → domínio, o descarte de valores desconhecidos,
 // a tradução dos códigos de erro, o envio do request_id, a ausência de retry
 // próprio do gRPC e os erros de configuração de TLS.
+
 package grpcclient_test
 
 import (

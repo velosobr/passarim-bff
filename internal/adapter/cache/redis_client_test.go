@@ -1,5 +1,6 @@
 // Testes do NewRedisClient: o prazo vale até para um servidor que não
 // responde, e a URL (que pode ter senha) nunca aparece no erro.
+
 package cache_test
 
 import (
