@@ -1,3 +1,5 @@
+// Testes da descoberta do IP real atrás de proxy.
+
 package middleware_test
 
 import (
@@ -9,6 +11,7 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/http/middleware"
 )
 
+// req cria uma requisição vinda de remote, com os X-Forwarded-For dados.
 func req(remote string, xff ...string) *http.Request {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = remote
@@ -18,6 +21,7 @@ func req(remote string, xff ...string) *http.Request {
 	return r
 }
 
+// trusted interpreta uma lista de redes CIDR.
 func trusted(cidrs ...string) []netip.Prefix {
 	var out []netip.Prefix
 	for _, c := range cidrs {
@@ -26,7 +30,7 @@ func trusted(cidrs ...string) []netip.Prefix {
 	return out
 }
 
-// Review Focus #3: sem proxy confiável, o cabeçalho é IGNORADO (qualquer cliente poderia forjá-lo).
+// Sem proxy confiável, o cabeçalho é IGNORADO (qualquer cliente poderia forjá-lo).
 func TestClientIP_IgnoresHeaderWhenConnectionNotTrusted(t *testing.T) {
 	ip := middleware.NewIPResolver(trusted("172.30.0.10/32"), "X-Forwarded-For")
 	if got := ip(req("198.51.100.7:5555", "1.2.3.4")); got != "198.51.100.7" {
@@ -37,6 +41,8 @@ func TestClientIP_IgnoresHeaderWhenConnectionNotTrusted(t *testing.T) {
 	}
 }
 
+// Vindo de um proxy confiável, vale a entrada mais à direita que não é
+// proxy; com uma entrada inválida, vale o IP da conexão.
 func TestClientIP_TrustedProxyUsesRightmostNonTrusted(t *testing.T) {
 	ip := middleware.NewIPResolver(trusted("172.30.0.10/32", "10.0.0.0/8"), "X-Forwarded-For")
 	cases := map[string]struct {
@@ -58,6 +64,8 @@ func TestClientIP_TrustedProxyUsesRightmostNonTrusted(t *testing.T) {
 	}
 }
 
+// IPv6 funciona, e um IPv4 escrito como IPv6 ("::ffff:1.2.3.4") é tratado
+// como o IPv4.
 func TestClientIP_IPv6AndMappedAddresses(t *testing.T) {
 	ip := middleware.NewIPResolver(trusted("172.30.0.10/32"), "X-Forwarded-For")
 	if got := ip(req("[2001:db8::1]:80")); got != "2001:db8::1" {
@@ -68,6 +76,7 @@ func TestClientIP_IPv6AndMappedAddresses(t *testing.T) {
 	}
 }
 
+// O nome do cabeçalho pode ser outro (CLIENT_IP_HEADER).
 func TestClientIP_HeaderNameIsConfigurable(t *testing.T) {
 	ip := middleware.NewIPResolver(trusted("172.30.0.10/32"), "Fly-Client-IP")
 	r := httptest.NewRequest("GET", "/", nil)

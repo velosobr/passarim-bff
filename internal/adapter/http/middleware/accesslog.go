@@ -1,3 +1,6 @@
+// Log de acesso: uma linha por requisição, com a rota, o status, a duração,
+// o resultado do cache e o IP do cliente, mais as métricas HTTP.
+
 package middleware
 
 import (
@@ -10,7 +13,8 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/reqmeta"
 )
 
-// Observer recebe cada requisição concluída (a Task 8 liga isto ao Prometheus).
+// Observer recebe cada requisição concluída; no main, quem o implementa é o
+// metrics.Prom (Prometheus). Com nil, só o log é escrito.
 type Observer interface {
 	ObserveHTTP(route, method string, status int, d time.Duration)
 }
@@ -18,6 +22,10 @@ type Observer interface {
 // AccessLog escreve UMA linha por requisição e avisa o Observer. A rota logada
 // é o PADRÃO casado ("GET /v1/species/{id}"), nunca a URL com parâmetros: não
 // vaza buscas do usuário e mantém a cardinalidade das métricas baixa.
+//
+// O statusRecorder fica no lugar do ResponseWriter para descobrir o status
+// que a rota escreveu, que o http.ResponseWriter não deixa ler depois. O
+// atributo "cache" também vai para o span do trace.
 func AccessLog(log *slog.Logger, ip IPResolver, obs Observer) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

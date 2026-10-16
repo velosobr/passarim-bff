@@ -1,3 +1,6 @@
+// Testes dos middlewares: recuperação de pânico, id da requisição, log de
+// acesso, cabeçalhos de segurança, limites de método e ordem da cadeia.
+
 package middleware_test
 
 import (
@@ -19,8 +22,11 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/reqmeta"
 )
 
+// discard é um logger que descarta tudo.
 var discard = slog.New(slog.DiscardHandler)
 
+// Um pânico vira 500 INTERNAL com requestId, e nem a mensagem do pânico nem
+// a pilha ("goroutine ...") aparecem na resposta.
 func TestRecovery_PanicBecomes500WithoutStack(t *testing.T) {
 	h := middleware.Chain(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("segredo-do-panic") }),
 		middleware.Recovery(discard), middleware.RequestID())
@@ -36,6 +42,8 @@ func TestRecovery_PanicBecomes500WithoutStack(t *testing.T) {
 	}
 }
 
+// http.ErrAbortHandler é o pânico que o próprio net/http usa para abortar
+// uma resposta de propósito: o Recovery o deixa seguir.
 func TestRecovery_RepropagatesAbortHandler(t *testing.T) {
 	h := middleware.Recovery(discard)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) }))
 	defer func() {
@@ -46,8 +54,11 @@ func TestRecovery_RepropagatesAbortHandler(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/x", nil))
 }
 
+// hex32 é o formato do id gerado: 32 caracteres hexadecimais minúsculos.
 var hex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
+// Um id recebido válido é mantido; um inválido (vazio, grande demais, com
+// caracteres estranhos) é trocado por um gerado.
 func TestRequestID_AcceptsValidAndReplacesInvalid(t *testing.T) {
 	var seen string
 	h := middleware.RequestID()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { seen = reqmeta.RequestID(r.Context()) }))
@@ -73,6 +84,7 @@ func TestRequestID_AcceptsValidAndReplacesInvalid(t *testing.T) {
 	}
 }
 
+// recObserver anota as requisições observadas.
 type recObserver struct {
 	route, method string
 	status        int
@@ -84,6 +96,8 @@ func (o *recObserver) ObserveHTTP(route, method string, status int, _ time.Durat
 	o.calls++
 }
 
+// O log de acesso tem os campos esperados e usa o padrão da rota, e o
+// Observer recebe a mesma rota e o status.
 func TestAccessLog_FieldsRouteAndObserver(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&buf, nil))
@@ -120,6 +134,7 @@ func TestAccessLog_FieldsRouteAndObserver(t *testing.T) {
 	}
 }
 
+// Os três cabeçalhos de segurança estão em toda resposta.
 func TestSecurityHeaders(t *testing.T) {
 	rec := httptest.NewRecorder()
 	middleware.SecurityHeaders()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
@@ -130,6 +145,7 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 }
 
+// GET e HEAD passam; os outros métodos recebem 405 com o cabeçalho Allow.
 func TestLimits_OnlyGetAndHead(t *testing.T) {
 	called := false
 	h := middleware.Chain(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), middleware.RequestID(), middleware.Limits())
@@ -154,6 +170,7 @@ func TestLimits_OnlyGetAndHead(t *testing.T) {
 	}
 }
 
+// O primeiro middleware da lista é o primeiro a rodar.
 func TestChain_FirstIsOutermost(t *testing.T) {
 	var order []string
 	mk := func(name string) middleware.Middleware {
@@ -168,6 +185,7 @@ func TestChain_FirstIsOutermost(t *testing.T) {
 	}
 }
 
+// O resultado do cache vira um atributo do span do trace.
 func TestAccessLog_SetsCacheAttributeOnSpan(t *testing.T) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))

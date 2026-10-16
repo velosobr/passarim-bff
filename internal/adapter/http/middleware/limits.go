@@ -1,3 +1,5 @@
+// Limites de método e de tamanho do corpo da requisição.
+
 package middleware
 
 import (
@@ -7,6 +9,7 @@ import (
 )
 
 // maxBodyBytes: a API só tem GET, então o corpo nunca é lido; o limite é defesa extra.
+// 1 << 10 = 1024 bytes (1 KiB).
 const maxBodyBytes = 1 << 10
 
 // Limits recusa qualquer método que não seja GET/HEAD (405 em problem+json, o

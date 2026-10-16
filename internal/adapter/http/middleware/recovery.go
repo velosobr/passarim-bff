@@ -1,3 +1,5 @@
+// Recuperação de pânico nas requisições.
+
 package middleware
 
 import (
@@ -13,6 +15,12 @@ import (
 // Recovery impede que um panic derrube o processo: responde 500 limpo (sem
 // stack na resposta) e loga a stack com o request_id. É o middleware mais
 // externo; o request_id já foi gravado na RESPOSTA pelo middleware RequestID.
+//
+// Em Go, um "panic" é um erro grave que desmonta a pilha de chamadas e, se
+// ninguém o pegar, encerra o programa. recover(), chamado dentro de um
+// defer, pega o pânico e devolve o valor dele. O net/http já recupera
+// pânicos sozinho, mas fecharia a conexão sem resposta; aqui respondemos
+// um 500 no formato do contrato.
 func Recovery(log *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
