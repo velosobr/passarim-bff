@@ -10,7 +10,7 @@ import "net/http"
 // cabeçalhos: nosniff proíbe o navegador de "adivinhar" o tipo do conteúdo
 // (um JSON nunca é executado como script); a Content-Security-Policy
 // "default-src 'none'" não deixa a resposta carregar nada; no-referrer não
-// envia a URL de origem a outros sites.
+// envia o cabeçalho Referer em nenhuma requisição feita a partir da resposta.
 func SecurityHeaders() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

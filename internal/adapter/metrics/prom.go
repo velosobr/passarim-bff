@@ -25,7 +25,7 @@ import (
 )
 
 // Prom implementa Metrics (cadeia de resiliência) e middleware.Observer (HTTP) com Prometheus.
-// Usa um Registry PRÓPRIO (não o global): os testes não se atrapalham e só sai o que é nosso.
+// Usa um Registry PRÓPRIO (não o global): os testes não se atrapalham e só sai o que registramos aqui.
 type Prom struct {
 	reg      *prometheus.Registry
 	cache    *prometheus.CounterVec

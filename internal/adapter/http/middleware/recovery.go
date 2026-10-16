@@ -13,8 +13,9 @@ import (
 )
 
 // Recovery impede que um panic derrube o processo: responde 500 limpo (sem
-// stack na resposta) e loga a stack com o request_id. É o middleware mais
-// externo; o request_id já foi gravado na RESPOSTA pelo middleware RequestID.
+// stack na resposta) e loga a stack com o request_id. É o mais externo da
+// Chain (só o otelhttp fica por fora); o request_id já foi gravado na
+// RESPOSTA pelo middleware RequestID.
 //
 // Em Go, um "panic" é um erro grave que desmonta a pilha de chamadas e, se
 // ninguém o pegar, encerra o programa. recover(), chamado dentro de um

@@ -53,6 +53,7 @@ caso "go: bloco /* */ novo"           a/x.go  $'package a' $'/*\n * Cabeçalho.\
 caso "go: linha em branco nova"       a/x.go  $'package a\nfunc F() {}' $'package a\n\nfunc F() {}' 0
 caso "go: código alterado"            a/x.go  $'package a\n\nfunc F() {}' $'package a\n\nfunc G() {}' 1
 caso "go: comentário no fim da linha" a/x.go  $'package a\n\nfunc F() {}' $'package a\n\nfunc F() {} // F' 1
+caso "go: desreferência de ponteiro" a/x.go  $'package a\n\nfunc F(p *int) {\n}' $'package a\n\nfunc F(p *int) {\n*p = 1\n}' 1
 caso "go: diretiva go:build"          a/x.go  $'//go:build linux\n\npackage a' $'//go:build darwin\n\npackage a' 1
 caso "go: diretiva nolint"            a/x.go  $'package a\n\n//nolint:gosec\nvar x = 1' $'package a\n\n//nolint:errcheck\nvar x = 1' 1
 caso "sql: comentário removido"       q.sql   $'-- antigo\nSELECT 1;' $'SELECT 1;' 0

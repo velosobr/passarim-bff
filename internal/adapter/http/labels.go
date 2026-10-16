@@ -5,7 +5,8 @@ package httpadapter
 
 import "github.com/velosobr/passarim-bff/internal/domain"
 
-// Rótulos em português: o app não precisa conhecer os códigos.
+// Rótulos em português: o app mostra o texto pronto, sem manter a própria
+// tradução dos códigos.
 var biomeLabels = map[domain.Biome]string{
 	domain.BiomeAmazonia: "Amazônia", domain.BiomeMataAtlantica: "Mata Atlântica", domain.BiomeCerrado: "Cerrado",
 	domain.BiomeCaatinga: "Caatinga", domain.BiomePantanal: "Pantanal", domain.BiomePampa: "Pampa",

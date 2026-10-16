@@ -314,5 +314,6 @@ func TestCache_DetailRoundTripKeepsEveryField(t *testing.T) {
 		len(second.Clusters) != 1 || second.Clusters[0].Precision != 0.5 || len(second.Biomes) != 1 || second.States[0] != "SP" || second.Facts[0].Text != "t" {
 		t.Fatalf("o que sai do cache precisa ser igual ao que entrou: %+v", second)
 	}
+	// Mantém o import de errors em uso neste arquivo.
 	_ = errors.New
 }

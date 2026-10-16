@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verifica que uma branch só mudou COMENTÁRIOS (e linhas em branco) em relação
-# a uma base. É a garantia da frente 0 do Passarim: comentar o código para
+# a uma base. Serve às branches que comentam o código do Passarim para
 # estudo sem alterar nenhuma linha de código.
 #
 # Uso: bash scripts/check-comment-only.sh [base]   (base padrão: origin/main)
@@ -16,12 +16,12 @@ set -euo pipefail
 
 base="${1:-origin/main}"
 
-# Arquivos que podem mudar livremente nesta frente: a configuração de lint que
+# Arquivos que podem mudar livremente numa branch de comentários: a configuração de lint que
 # os comentários exigirem, o próprio verificador, a CI que o chama e o README.
 liberados='^(\.golangci\.yml|config/detekt\.yml|\.editorconfig|README\.md|scripts/check-comment-only(_test)?\.sh|\.github/workflows/ci\.yml)$'
 
 # estilo_do_arquivo <caminho>: escreve qual sintaxe de comentário o arquivo usa.
-# Retorna erro para extensões que esta frente não deveria tocar (por exemplo,
+# Retorna erro para extensões que uma branch de comentários não deveria tocar (por exemplo,
 # JSON, que nem tem comentário).
 estilo_do_arquivo() {
   case "$(basename "$1")" in
@@ -44,7 +44,9 @@ eh_comentario() {
     barra)
       # Diretivas do Go parecem comentário, mas mudam o build ou o lint.
       [[ "$t" == "//go:"* || "$t" == "//nolint"* ]] && return 1
-      [[ "$t" == "//"* || "$t" == "/*"* || "$t" == "*"* ]] && return 0
+      # Dentro de um bloco /* */, as linhas começam com "*" seguido de espaço
+      # (ou são só "*" ou "*/"); "*p = 1" é código (desreferência de ponteiro).
+      [[ "$t" == "//"* || "$t" == "/*"* || "$t" == "*" || "$t" == "* "* || "$t" == "*/"* ]] && return 0
       ;;
     sql)
       # "-- name: X :one" é a marcação que o sqlc usa para gerar código.
@@ -69,7 +71,7 @@ violacoes=0
 while IFS= read -r arquivo; do
   [[ "$arquivo" =~ $liberados ]] && continue
   if ! estilo="$(estilo_do_arquivo "$arquivo")"; then
-    echo "$arquivo: tipo de arquivo que esta frente não pode alterar"
+    echo "$arquivo: tipo de arquivo que uma branch de comentários não pode alterar"
     violacoes=$((violacoes + 1))
     continue
   fi

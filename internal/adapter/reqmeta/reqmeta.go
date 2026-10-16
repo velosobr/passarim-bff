@@ -1,7 +1,8 @@
 // Package reqmeta guarda, no contexto, os dados de UMA requisição que várias
 // camadas precisam compartilhar: o request_id (para os logs) e o resultado do
 // cache (para o cabeçalho X-Cache e o log de acesso). É um registro MUTÁVEL:
-// o handler cria, o decorator de cache escreve, o handler lê depois.
+// o middleware RequestID cria, o decorator de cache escreve, e o handler e
+// o AccessLog leem depois.
 //
 // Um context.Context pode carregar valores além do prazo: context.WithValue
 // cria um contexto filho com um par chave/valor. Como o contexto passa por

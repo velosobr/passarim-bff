@@ -5,6 +5,7 @@
 // Em Go, os testes ficam em arquivos terminados em _test.go e são funções
 // TestXxx(t *testing.T); "go test" as encontra sozinho. t.Fatalf marca o teste
 // como falho e o interrompe.
+
 package main
 
 import (

@@ -58,7 +58,7 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
 
-  # Frente 0 do Passarim: nas branches que só comentam o código, garante que
+  # Nas branches docs/comentarios-*, que só comentam o código, garante que
   # nenhuma linha de código mudou (scripts/check-comment-only.sh).
   comentarios:
     if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'docs/comentarios-')

@@ -62,7 +62,9 @@ func New(next usecase.CatalogReader, store Store, cfg Config, log *slog.Logger, 
 	return &cache{next: next, store: store, cfg: cfg, log: log, m: m}
 }
 
-// envelope é o que fica no Redis: o dado + quando foi gravado.
+// envelope é o que fica no Redis: o dado + quando foi gravado. "[D any]" é
+// um parâmetro de tipo (generics): D é trocado pelo DTO real no uso. As tags
+// `json:"..."` dão o nome de cada campo no JSON gravado.
 type envelope[D any] struct {
 	StoredAt time.Time `json:"storedAt"`
 	Data     D         `json:"data"`
@@ -72,8 +74,7 @@ type envelope[D any] struct {
 // os que estão esperando. O erro vai dentro do resultado, e não como erro do
 // singleflight, para cada chamador decidir sozinho se serve o dado velho.
 //
-// "[T any]" é um parâmetro de tipo (generics): a mesma struct serve para uma
-// espécie, uma página ou os filtros; T é trocado pelo tipo real no uso.
+// T é o tipo do domínio: uma espécie, uma página ou os filtros.
 type flightResult[T any] struct {
 	value T
 	err   error
@@ -132,8 +133,12 @@ func cached[T, D any](ctx context.Context, c *cache, key string, call func(conte
 	})
 
 	// 4. Cada chamador espera pelo resultado OU pela sua própria desistência.
+	// select espera o primeiro de vários canais que ficar pronto: aqui, o
+	// resultado do voo (ch) ou o fim do contexto deste chamador (ctx.Done()).
 	select {
 	case res := <-ch:
+		// res.Val é any; ".(flightResult[T])" é uma type assertion, que diz ao Go
+		// qual é o tipo real guardado ali.
 		fr := res.Val.(flightResult[T])
 		if fr.err == nil { // 5. sucesso
 			c.m.CacheResult("miss")

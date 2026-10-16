@@ -44,6 +44,7 @@ import (
 //     acompanhar na memória (ADR-0015).
 //   - TrustedProxies (TRUSTED_PROXIES) e ClientIPHeader (CLIENT_IP_HEADER,
 //     "X-Forwarded-For"): de quais proxies aceitar o cabeçalho com o IP real.
+//     Vazio (padrão) = nenhum proxy confiável, e o cabeçalho é ignorado.
 //   - ShutdownDrainDelay (SHUTDOWN_DRAIN_DELAY, 3s) e ShutdownTimeout
 //     (SHUTDOWN_TIMEOUT, 10s): as esperas do desligamento gracioso.
 //   - LogLevel (LOG_LEVEL, info): nível mínimo dos logs.
@@ -76,7 +77,8 @@ type Config struct {
 // writeTimeout é o WriteTimeout fixo do servidor HTTP (NewHTTPServer, em
 // internal/adapter/server); o orçamento + 1 s de margem precisa caber nele.
 // Se o orçamento fosse maior, o servidor cortaria a conexão antes de o BFF
-// conseguir responder, e o cliente veria um erro de rede em vez de um 504.
+// conseguir responder, e o cliente veria um erro de rede em vez do dado
+// velho do cache ou de um 503 em problem+json.
 const writeTimeout = 5 * time.Second
 
 // Load recebe getenv (e não chama os.Getenv) para os testes passarem um ambiente falso.

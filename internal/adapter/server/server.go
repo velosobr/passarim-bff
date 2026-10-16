@@ -17,7 +17,8 @@ import (
 	"time"
 )
 
-// Readiness diz se o BFF pode receber tráfego. Vira "não pronto" ao receber SIGTERM.
+// Readiness diz se o BFF pode receber tráfego. Vira "não pronto" no início do
+// desligamento (SIGTERM ou falha de um servidor).
 // atomic.Bool é um booleano que várias goroutines podem ler e escrever ao
 // mesmo tempo sem trava (o readyz lê enquanto o Run escreve).
 type Readiness struct{ shuttingDown atomic.Bool }
@@ -63,6 +64,8 @@ func NewHTTPServer(h http.Handler) *http.Server {
 // num só, sem perder nenhum.
 func Run(ctx context.Context, o Options) error {
 	api, metrics := NewHTTPServer(o.Handler), NewHTTPServer(o.MetricsHandler)
+	// Um canal (chan) é um cano por onde goroutines trocam valores. Este cabe
+	// dois erros sem bloquear, um por servidor.
 	errCh := make(chan error, 2)
 	serve := func(s *http.Server, l net.Listener, name string) {
 		if err := s.Serve(l); !errors.Is(err, http.ErrServerClosed) {

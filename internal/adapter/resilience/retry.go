@@ -64,11 +64,13 @@ func NewRetry(next usecase.CatalogReader, cfg RetryConfig, m metrics.Metrics) us
 }
 
 // sleepCtx espera d, mas acorda antes se o contexto acabar: um time.Sleep
-// comum seguiria dormindo mesmo com o cliente já tendo desistido. O timer é
-// parado no fim para não ficar ocupando memória.
+// comum seguiria dormindo mesmo com o cliente já tendo desistido. O defer
+// t.Stop() desarma o timer quando o contexto acaba primeiro; desde o Go
+// 1.23 ele seria coletado mesmo sem Stop, mas parar é o hábito explícito.
 func sleepCtx(ctx context.Context, d time.Duration) error {
 	t := time.NewTimer(d)
 	defer t.Stop()
+	// select espera o que vier primeiro: o fim do contexto ou o disparo do timer.
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -80,6 +82,8 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 // attempt roda UMA tentativa com timeout = min(AttemptTimeout, tempo restante da requisição).
 // Mede quanto a tentativa levou e registra o resultado na métrica, por método
 // e por Kind.
+// "[T any]" é um parâmetro de tipo (generics): a mesma função serve para
+// uma página, uma espécie ou os filtros, e T é trocado pelo tipo real.
 func attempt[T any](ctx context.Context, r *retry, method string, fn func(context.Context) (T, error)) (T, error) {
 	tctx, cancel := context.WithTimeout(ctx, r.cfg.AttemptTimeout) // WithTimeout já nunca passa do prazo do pai
 	defer cancel()

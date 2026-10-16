@@ -39,7 +39,7 @@ var validBiomes = map[Biome]bool{
 	BiomeCaatinga: true, BiomePantanal: true, BiomePampa: true,
 }
 
-// ParseBiome aceita só os códigos exatos (sem diferenciar nada: "Cerrado" não vale).
+// ParseBiome aceita só os códigos exatos, em minúsculas: "Cerrado" não vale.
 //
 // Devolve o bioma e um booleano que diz se o código é conhecido. Em Go,
 // devolver (valor, ok) é o jeito comum de dizer "achei ou não achei" sem

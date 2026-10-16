@@ -6,8 +6,10 @@ import "net/http"
 
 // statusRecorder guarda o status escrito, para o log, as métricas e o recovery.
 //
-// Ele embute o http.ResponseWriter original (o campo sem nome), então
-// herda todos os métodos dele e só sobrescreve WriteHeader e Write.
+// Ele embute o http.ResponseWriter original (o campo sem nome). Embutir uma
+// interface promove só os métodos dela (Header, Write, WriteHeader); outros
+// que o writer concreto tenha, como Flush, ficam escondidos, e por isso
+// existe o Unwrap abaixo. Aqui sobrescrevemos WriteHeader e Write.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int

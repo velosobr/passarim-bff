@@ -68,6 +68,8 @@ func main() {
 // do valor informado e devolve false quando o ctx é cancelado: é isso que
 // encerra o laço no desligamento. Esta função roda numa goroutine própria
 // (veja "go watchConnection" em run), porque ficaria bloqueada para sempre.
+// Uma goroutine é uma função rodando em paralelo, leve e gerenciada pelo Go;
+// "go f()" a inicia e segue em frente sem esperar.
 func watchConnection(ctx context.Context, conn *grpc.ClientConn, log *slog.Logger) {
 	state := conn.GetState()
 	conn.Connect() // sai de Idle e começa a conectar já na subida
@@ -118,7 +120,8 @@ func run(getenv func(string) string) error {
 	// Métricas do Prometheus, servidas em /metrics na porta separada.
 	prom := metrics.NewProm()
 
-	// Redis: todos os prazos do cliente seguem o REDIS_TIMEOUT (ver cache.NewRedisClient).
+	// Redis: os prazos de discagem, leitura e escrita seguem o REDIS_TIMEOUT
+	// (ver cache.NewRedisClient).
 	redisClient, err := cache.NewRedisClient(cfg.RedisURL, cfg.RedisTimeout)
 	if err != nil {
 		return err
@@ -152,8 +155,8 @@ func run(getenv func(string) string) error {
 	reader = cache.New(reader, cache.NewRedisStore(redisClient, cfg.RedisTimeout),
 		cache.Config{FreshTTL: cfg.CacheFreshTTL, StaleTTL: cfg.CacheStaleTTL, Budget: cfg.RequestBudget}, log, prom)
 
-	// O catalog devolve só chaves de mídia; o media.URLs monta a URL pública
-	// a partir de MEDIA_BASE_URL (ADR-0006).
+	// O catalog devolve só chaves de mídia; o media.Builder (mediaURLs) monta a
+	// URL pública a partir de MEDIA_BASE_URL (ADR-0006).
 	mediaURLs, err := media.New(cfg.MediaBaseURL, log)
 	if err != nil {
 		return err
@@ -175,8 +178,8 @@ func run(getenv func(string) string) error {
 	// a conexão vem de um proxy confiável (TRUSTED_PROXIES).
 	clientIP := middleware.NewIPResolver(cfg.TrustedProxies, cfg.ClientIPHeader)
 	// Rate limit por IP, em memória de cada réplica (ADR-0015). IPs parados
-	// há 3 minutos são esquecidos, e no máximo RATE_LIMIT_MAX_IPS ficam na
-	// memória.
+	// há mais de 3 minutos são esquecidos na faxina seguinte, e no máximo
+	// RATE_LIMIT_MAX_IPS ficam na memória.
 	limiter := middleware.NewRateLimiter(middleware.RateLimitConfig{
 		RPS: cfg.RateLimitRPS, Burst: cfg.RateLimitBurst, MaxIPs: cfg.RateLimitMaxIPs, IdleAfter: 3 * time.Minute, OnLimited: prom.RateLimited,
 	}, clientIP, time.Now)

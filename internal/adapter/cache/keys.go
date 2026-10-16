@@ -25,7 +25,8 @@ const filtersKey = keyPrefix + "filters"
 
 // listKey: o hash é calculado sobre o ListQuery JÁ normalizado (q aparado, UF em maiúsculas,
 // limit efetivo), então consultas equivalentes compartilham a mesma chave. Os campos entram
-// com tamanho na frente para "a|b" + "c" nunca colidir com "a" + "b|c".
+// com tamanho na frente: cada um entra como "<tamanho>:<texto>", para "ab" +
+// "c" nunca colidir com "a" + "bc".
 //
 // SHA-256 é uma função de hash: transforma qualquer texto num número de 256
 // bits (64 caracteres em hexadecimal), sempre o mesmo para a mesma entrada.

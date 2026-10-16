@@ -64,7 +64,8 @@ func New(cfg Config, extra ...grpc.DialOption) (*Client, error) {
 	}
 	opts := append([]grpc.DialOption{
 		grpc.WithTransportCredentials(creds),
-		// O único retry do BFF é o da camada resilience; o do gRPC ficaria duplicado.
+		// Desliga o retry configurável do gRPC: quem repete é a camada resilience.
+		// Ficam só os retries transparentes do gRPC (pedido que nem saiu pela rede).
 		grpc.WithDisableRetry(),
 		grpc.WithChainUnaryInterceptor(requestIDInterceptor),
 	}, extra...)
@@ -87,6 +88,11 @@ func (c *Client) Conn() *grpc.ClientConn { return c.conn }
 
 // requestIDInterceptor manda o request_id do BFF ao catalog (x-request-id),
 // para seguir a mesma requisição nos logs dos dois serviços.
+//
+// Um interceptor é uma função que o gRPC chama em volta de cada chamada
+// (como um middleware HTTP); "unário" é a chamada simples de um pedido e uma
+// resposta. Ele acrescenta o metadado no contexto e chama invoker, que faz a
+// chamada de verdade.
 func requestIDInterceptor(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 	if id := reqmeta.RequestID(ctx); id != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, requestIDHeader, id)

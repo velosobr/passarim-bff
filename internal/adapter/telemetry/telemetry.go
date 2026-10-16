@@ -23,7 +23,8 @@ import (
 )
 
 // Setup instala o propagador e, se houver endpoint, o exportador OTLP via
-// gRPC. Devolve a função de desligamento, que envia os spans ainda no buffer
+// gRPC (OTLP é o protocolo padrão do OpenTelemetry para enviar traces a um
+// coletor, como o Jaeger). Devolve a função de desligamento, que envia os spans ainda no buffer
 // (o "batcher" junta vários spans antes de enviar, para gastar menos rede).
 // Com http:// a conexão com o coletor é sem TLS; com https://, com TLS.
 func Setup(ctx context.Context, endpoint, serviceName string) (func(context.Context) error, error) {

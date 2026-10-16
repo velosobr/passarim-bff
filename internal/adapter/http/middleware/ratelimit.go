@@ -40,6 +40,8 @@ type RateLimiter struct {
 	ip  IPResolver
 	now func() time.Time
 
+	// mu é uma trava (sync.Mutex): só uma goroutine por vez mexe no mapa e na
+	// lista, porque várias requisições chegam ao mesmo tempo.
 	mu   sync.Mutex
 	byIP map[string]*list.Element
 	lru  *list.List // frente = mais recente
@@ -107,6 +109,7 @@ func (rl *RateLimiter) Run(ctx context.Context, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
+		// select espera o que vier primeiro: o fim do contexto ou o próximo tique.
 		select {
 		case <-ctx.Done():
 			return
@@ -128,6 +131,7 @@ func (rl *RateLimiter) Tracked() int {
 // arredondado para cima e no mínimo 1. As rotas de saúde nunca são
 // limitadas, para o Docker e o Traefik não marcarem o BFF como doente.
 func (rl *RateLimiter) Middleware() Middleware {
+	// max é uma função embutida do Go (desde a 1.21) que devolve o maior valor.
 	retryAfter := strconv.Itoa(max(1, int(math.Ceil(1/rl.cfg.RPS))))
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

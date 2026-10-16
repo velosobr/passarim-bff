@@ -61,7 +61,7 @@ func TestBreaker_OpensOnFailureRatio(t *testing.T) {
 	}
 }
 
-// Cliente que desconecta e 404 NÃO são falha do catalog. Mesmo com 30
+// NotFound, InvalidArgument, Canceled e Internal NÃO são falha do catalog. Mesmo com 30
 // erros desses, o circuito continua fechado e todas as chamadas chegam ao
 // catalog.
 func TestBreaker_IgnoresNonInfrastructureErrors(t *testing.T) {
@@ -106,7 +106,7 @@ func TestBreaker_HalfOpenThenClosesOnSuccess(t *testing.T) {
 }
 
 // O erro de circuito aberto libera o dado velho do cache e não conta como
-// falha do catalog (senão o breaker se manteria aberto sozinho).
+// falha do catalog.
 func TestBreaker_WrapsErrorsAsCircuitOpenKind(t *testing.T) {
 	_, _, call := newBreaker(t, fastBreaker(), kindErr(domain.KindUnavailable))
 	for i := 0; i < 5; i++ {

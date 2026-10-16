@@ -5,6 +5,7 @@
 test:
 	go test -race ./...
 
+# Lint com o golangci-lint (regras no .golangci.yml).
 lint:
 	golangci-lint run
 

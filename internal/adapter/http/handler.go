@@ -27,10 +27,12 @@ type SpeciesLister interface {
 	Run(ctx context.Context, raw domain.RawListQuery) (domain.SpeciesPage, error)
 }
 
+// SpeciesGetter é o caso de uso do detalhe.
 type SpeciesGetter interface {
 	Run(ctx context.Context, id string) (domain.Species, error)
 }
 
+// FiltersLister é o caso de uso dos filtros.
 type FiltersLister interface {
 	Run(ctx context.Context) (domain.Filters, error)
 }

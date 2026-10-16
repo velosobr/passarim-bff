@@ -7,8 +7,9 @@
 // Os três estados:
 //   - fechado: tudo normal, as chamadas passam e as falhas são contadas;
 //   - aberto: as chamadas são recusadas na hora, por Timeout (30 s);
-//   - meio-aberto: depois do Timeout, deixa passar algumas chamadas de teste
-//     (MaxRequests); se derem certo, fecha; se falharem, abre de novo.
+//   - meio-aberto: depois do Timeout, deixa passar até MaxRequests (3)
+//     chamadas de teste; com 3 sucessos seguidos, fecha; uma falha só já
+//     reabre.
 //
 // Usamos a biblioteca gobreaker, da Sony.
 
@@ -39,8 +40,8 @@ type BreakerConfig struct {
 	FailureRatio        float64
 }
 
-// DefaultBreakerConfig são os valores da spec (§5.4). Ficam como constantes
-// comentadas, não como variáveis de ambiente.
+// DefaultBreakerConfig são os valores da spec (§5.4), fixos no código e não
+// em variáveis de ambiente.
 func DefaultBreakerConfig() BreakerConfig {
 	return BreakerConfig{MaxRequests: 3, Interval: 60 * time.Second, Timeout: 30 * time.Second, ConsecutiveFailures: 5, MinRequests: 10, FailureRatio: 0.6}
 }
@@ -62,8 +63,8 @@ func NewBreaker(next usecase.CatalogReader, cfg BreakerConfig, log *slog.Logger,
 			return c.ConsecutiveFailures >= cfg.ConsecutiveFailures ||
 				(c.Requests >= cfg.MinRequests && float64(c.TotalFailures)/float64(c.Requests) >= cfg.FailureRatio)
 		},
-		// Só falha de INFRAESTRUTURA conta. NotFound, InvalidArgument, Canceled (cliente que
-		// desconectou) e Internal não são sinal de que o catalog esteja doente.
+		// Só falha de INFRAESTRUTURA conta como falha. NotFound, InvalidArgument,
+		// Canceled e Internal contam como sucesso: não são sinal de catalog doente.
 		IsSuccessful: func(err error) bool { return err == nil || !domain.KindOf(err).CountsForBreaker() },
 		OnStateChange: func(name string, from, to gobreaker.State) {
 			log.Info("circuit breaker mudou de estado", "breaker", name, "from", from.String(), "to", to.String())

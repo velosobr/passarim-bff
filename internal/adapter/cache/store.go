@@ -34,8 +34,10 @@ func NewRedisStore(c *redis.Client, timeout time.Duration) *RedisStore {
 	return &RedisStore{c: c, timeout: timeout}
 }
 
-// Get lê a chave dentro do prazo próprio. redis.Nil é o "erro" que o
-// go-redis usa para chave inexistente; aqui ele vira found = false.
+// Get lê a chave. O prazo de REDIS_TIMEOUT vem do ReadTimeout/WriteTimeout
+// do cliente (NewRedisClient); o contexto daqui limita a espera por uma
+// conexão livre e a discagem. redis.Nil é o "erro" que o go-redis usa para
+// chave inexistente; aqui ele vira found = false.
 func (s *RedisStore) Get(ctx context.Context, key string) ([]byte, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
@@ -49,18 +51,19 @@ func (s *RedisStore) Get(ctx context.Context, key string) ([]byte, bool, error) 
 	return v, true, nil
 }
 
-// Set grava a chave com o TTL, também dentro do prazo próprio.
+// Set grava a chave com o TTL, com os mesmos prazos do Get.
 func (s *RedisStore) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	return s.c.Set(ctx, key, value, ttl).Err()
 }
 
-// NewRedisClient cria o cliente go-redis com TODOS os prazos presos ao REDIS_TIMEOUT.
-// O go-redis tem DialTimeout de 5 s e o handshake da conexão não obedece ao prazo do
-// contexto: sem isto, um Redis que aceita a conexão e não responde prenderia cada
-// requisição por 5 s, estourando o orçamento de 3 s. A URL pode ter senha, então o
-// erro nunca a repete.
+// NewRedisClient cria o cliente go-redis com os prazos de rede presos ao
+// REDIS_TIMEOUT. Por padrão o go-redis ignora o prazo do contexto ao ler e
+// escrever no socket (ContextTimeoutEnabled = false) e usa ReadTimeout e
+// WriteTimeout de 5 s: sem isto, um Redis que aceita a conexão e não responde
+// prenderia cada requisição por 5 s, estourando o orçamento de 3 s. A URL
+// pode ter senha, então o erro nunca a repete.
 func NewRedisClient(url string, timeout time.Duration) (*redis.Client, error) {
 	opt, err := redis.ParseURL(url)
 	if err != nil {
