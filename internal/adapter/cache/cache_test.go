@@ -1,3 +1,6 @@
+// Testes do decorator de cache, com peças falsas (fakes_test.go): fresco e
+// velho, quando servir o dado velho, a busca fora do cache, as chaves, o
+// Redis fora do ar e o singleflight com chamadores concorrentes.
 package cache_test
 
 import (
@@ -12,6 +15,10 @@ import (
 	"github.com/velosobr/passarim-bff/internal/domain"
 )
 
+// env junta as peças de um teste: o catalog falso, o store em memória, o
+// relógio, as métricas e o cache montado sobre eles. O campo c é declarado
+// com uma interface anônima com os três métodos, o mesmo formato do
+// CatalogReader.
 type env struct {
 	cat   *fakeCatalog
 	store *memStore
@@ -24,6 +31,8 @@ type env struct {
 	}
 }
 
+// newEnv monta o cache com os tempos padrão (10 min fresco, 24 h velho,
+// orçamento de 3 s) e o relógio falso.
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	e := &env{cat: &fakeCatalog{}, store: newMemStore(), clk: &clock{now: time.Now()}, m: &recMetrics{}}
@@ -31,11 +40,15 @@ func newEnv(t *testing.T) *env {
 	return e
 }
 
+// ctxWithMeta cria um contexto com um registro de requisição, para o teste
+// ler o resultado do cache (o valor do X-Cache).
 func ctxWithMeta() (context.Context, *reqmeta.Meta) {
 	m := reqmeta.New("req")
 	return reqmeta.With(context.Background(), m), m
 }
 
+// A primeira busca é "miss" e grava no store com o TTL de 24 h; a segunda,
+// dentro dos 10 minutos, é "hit" e não chama o catalog.
 func TestCache_MissThenHitWhileFresh(t *testing.T) {
 	e := newEnv(t)
 	ctx, meta := ctxWithMeta()
@@ -55,6 +68,8 @@ func TestCache_MissThenHitWhileFresh(t *testing.T) {
 	}
 }
 
+// Passados 11 minutos, o dado ainda está no store, mas não é mais fresco: o
+// cache busca no catalog de novo.
 func TestCache_RefreshesWhenFreshnessExpires(t *testing.T) {
 	e := newEnv(t)
 	_, _ = e.c.GetSpecies(context.Background(), "sabia")
@@ -65,7 +80,9 @@ func TestCache_RefreshesWhenFreshnessExpires(t *testing.T) {
 	}
 }
 
-// Review Focus #2: com o catalog doente, o app recebe o dado velho, não um 503.
+// Com o catalog doente, o app recebe o dado velho, não um 503. Vale para as
+// quatro falhas que liberam stale. Para uma espécie que nunca foi guardada,
+// não há o que servir, e o erro sai.
 func TestCache_ServesStaleOnUpstreamAndCircuitOpen(t *testing.T) {
 	for _, k := range []domain.Kind{domain.KindUnavailable, domain.KindTimeout, domain.KindUpstream, domain.KindCircuitOpen} {
 		e := newEnv(t)
@@ -84,6 +101,8 @@ func TestCache_ServesStaleOnUpstreamAndCircuitOpen(t *testing.T) {
 	}
 }
 
+// Para as outras falhas (não encontrado, inválido, cancelado, bug), o erro
+// sai mesmo havendo um dado velho.
 func TestCache_NoStaleForNotFoundInvalidCanceledInternal(t *testing.T) {
 	for _, k := range []domain.Kind{domain.KindNotFound, domain.KindInvalidArgument, domain.KindCanceled, domain.KindInternal} {
 		e := newEnv(t)
@@ -96,7 +115,9 @@ func TestCache_NoStaleForNotFoundInvalidCanceledInternal(t *testing.T) {
 	}
 }
 
-// Review Focus #6: busca com texto livre não cria chaves no Redis.
+// Busca com texto livre não cria chaves no Redis: cada texto diferente seria
+// uma chave nova, e o Redis encheria de buscas que ninguém repete. O
+// resultado é contado como "bypass".
 func TestCache_SearchBypassesCache(t *testing.T) {
 	e := newEnv(t)
 	for _, q := range []string{"sabia", "bem-te-vi", "xyz"} {
@@ -110,6 +131,9 @@ func TestCache_SearchBypassesCache(t *testing.T) {
 	}
 }
 
+// A lista sem busca entra no cache: a mesma consulta usa a mesma chave, e
+// mudar o limit, a UF ou o cursor gera outra chave, sempre no padrão
+// bff:v1:list:<sha256>.
 func TestCache_ListWithoutSearchIsCachedAndKeyIsNormalized(t *testing.T) {
 	e := newEnv(t)
 	q := domain.ListQuery{State: "SP", Biome: domain.BiomeCerrado, Limit: 20}
@@ -131,6 +155,7 @@ func TestCache_ListWithoutSearchIsCachedAndKeyIsNormalized(t *testing.T) {
 	}
 }
 
+// Os filtros ficam na chave fixa bff:v1:filters.
 func TestCache_FiltersAreCached(t *testing.T) {
 	e := newEnv(t)
 	_, _ = e.c.ListFilters(context.Background())
@@ -140,6 +165,8 @@ func TestCache_FiltersAreCached(t *testing.T) {
 	}
 }
 
+// Um valor ilegível no store é tratado como "não tem", e a resposta boa o
+// sobrescreve.
 func TestCache_InvalidEnvelopeIsMiss(t *testing.T) {
 	e := newEnv(t)
 	e.store.data["bff:v1:species:sabia"] = []byte("{isto não é um envelope")
@@ -152,6 +179,8 @@ func TestCache_InvalidEnvelopeIsMiss(t *testing.T) {
 	}
 }
 
+// Com o Redis fora do ar na leitura e na gravação, a requisição funciona
+// (vai ao catalog) e a falha aparece na métrica "error".
 func TestCache_RedisDownIsMissAndNeverBreaksTheRequest(t *testing.T) {
 	e := newEnv(t)
 	e.store.getErr, e.store.setErr = errBoom, errBoom
@@ -165,6 +194,9 @@ func TestCache_RedisDownIsMissAndNeverBreaksTheRequest(t *testing.T) {
 	}
 }
 
+// Dez goroutines pedem a mesma espécie enquanto o catalog está travado no
+// gate. Quando ele libera, todas recebem a resposta, e o catalog foi
+// chamado uma vez só.
 func TestCache_SingleflightCollapsesConcurrentCalls(t *testing.T) {
 	e := newEnv(t)
 	e.cat.gate = make(chan struct{})
@@ -194,7 +226,8 @@ func TestCache_SingleflightCollapsesConcurrentCalls(t *testing.T) {
 	}
 }
 
-// Review Focus #1: o primeiro chamador desiste, o segundo (no mesmo voo) ainda recebe o dado.
+// O primeiro chamador desiste, o segundo (no mesmo voo) ainda recebe o dado.
+// Isso prova que o voo compartilhado não usa o contexto de quem o começou.
 func TestCache_FirstCallerCancelsSecondStillGetsData(t *testing.T) {
 	e := newEnv(t)
 	e.cat.gate = make(chan struct{})
@@ -223,6 +256,8 @@ func TestCache_FirstCallerCancelsSecondStillGetsData(t *testing.T) {
 	}
 }
 
+// O catalog trava e o orçamento da requisição (60 ms aqui) acaba: como há
+// um dado velho na memória, ele é servido.
 func TestCache_ExpiredBudgetWithCandidateServesStale(t *testing.T) {
 	e := newEnv(t)
 	_, _ = e.c.GetSpecies(context.Background(), "sabia") // guarda um candidato
@@ -239,6 +274,9 @@ func TestCache_ExpiredBudgetWithCandidateServesStale(t *testing.T) {
 	}
 }
 
+// Quando é o cliente que desiste (cancelamento, e não prazo), o resultado é
+// o erro, mesmo havendo dado velho: não há mais ninguém para receber a
+// resposta.
 func TestCache_ClientCancelWithCandidateIsStillAnError(t *testing.T) {
 	e := newEnv(t)
 	_, _ = e.c.GetSpecies(context.Background(), "sabia")
@@ -252,6 +290,8 @@ func TestCache_ClientCancelWithCandidateIsStillAnError(t *testing.T) {
 	}
 }
 
+// Uma espécie com todos os campos preenchidos sai do cache igual a como
+// entrou: nenhum campo se perde na conversão para JSON e de volta.
 func TestCache_DetailRoundTripKeepsEveryField(t *testing.T) {
 	e := newEnv(t)
 	size, diet := 23, "frutos"

@@ -1,3 +1,5 @@
+// Onde os bytes do cache ficam guardados: a interface Store e a
+// implementação com Redis.
 package cache
 
 import (
@@ -9,6 +11,11 @@ import (
 )
 
 // Store é o armazenamento de bytes do cache (o Redis em produção; um mapa nos testes).
+//
+// Get devolve o valor, se a chave existe (found) e um erro só quando o Redis
+// falhou. O cache trata "não existe" e "Redis fora do ar" de jeitos
+// diferentes, por isso os dois casos não se misturam. Set grava com um TTL
+// (tempo de vida): o Redis apaga a chave sozinho quando ele acaba.
 type Store interface {
 	Get(ctx context.Context, key string) (value []byte, found bool, err error)
 	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
@@ -21,10 +28,13 @@ type RedisStore struct {
 	timeout time.Duration
 }
 
+// NewRedisStore embrulha um cliente go-redis já criado.
 func NewRedisStore(c *redis.Client, timeout time.Duration) *RedisStore {
 	return &RedisStore{c: c, timeout: timeout}
 }
 
+// Get lê a chave dentro do prazo próprio. redis.Nil é o "erro" que o
+// go-redis usa para chave inexistente; aqui ele vira found = false.
 func (s *RedisStore) Get(ctx context.Context, key string) ([]byte, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
@@ -38,6 +48,7 @@ func (s *RedisStore) Get(ctx context.Context, key string) ([]byte, bool, error) 
 	return v, true, nil
 }
 
+// Set grava a chave com o TTL, também dentro do prazo próprio.
 func (s *RedisStore) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()

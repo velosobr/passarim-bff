@@ -1,3 +1,4 @@
+// DTOs do cache e as conversões entre eles e o domínio.
 package cache
 
 import "github.com/velosobr/passarim-bff/internal/domain"
@@ -5,7 +6,14 @@ import "github.com/velosobr/passarim-bff/internal/domain"
 // Estas structs são o FORMATO GRAVADO no Redis (com tags JSON). O domínio não
 // tem JSON de propósito: assim renomear um campo do domínio não muda, sem aviso,
 // o que está guardado.
+//
+// DTO (Data Transfer Object) é uma struct que só existe para ser convertida
+// num formato de fora. As "tags" entre crases (`json:"author"`) dizem ao
+// encoding/json qual nome cada campo terá no JSON. Os nomes gravados não
+// podem mudar à toa: um envelope antigo, ainda no Redis, seria lido com
+// campos vazios. Mudança de formato pede subir o prefixo das chaves (keys.go).
 
+// creditJSON é o crédito de autoria gravado.
 type creditJSON struct {
 	Author    string `json:"author"`
 	License   string `json:"license"`
@@ -13,6 +21,7 @@ type creditJSON struct {
 	SourceURL string `json:"sourceUrl"`
 }
 
+// summaryJSON é o card da lista gravado.
 type summaryJSON struct {
 	ID           string `json:"id"`
 	Scientific   string `json:"scientificName"`
@@ -21,11 +30,13 @@ type summaryJSON struct {
 	Conservation string `json:"conservation"`
 }
 
+// pageJSON é uma página da lista gravada, com o cursor da próxima.
 type pageJSON struct {
 	Items      []summaryJSON `json:"items"`
 	NextCursor string        `json:"nextCursor"`
 }
 
+// photoJSON é uma foto gravada, com as três chaves de tamanho.
 type photoJSON struct {
 	Thumb  string     `json:"thumbKey"`
 	Medium string     `json:"mediumKey"`
@@ -35,17 +46,20 @@ type photoJSON struct {
 	Credit creditJSON `json:"credit"`
 }
 
+// audioJSON é o canto gravado.
 type audioJSON struct {
 	Key        string     `json:"key"`
 	DurationMs int        `json:"durationMs"`
 	Credit     creditJSON `json:"credit"`
 }
 
+// factJSON é uma curiosidade gravada.
 type factJSON struct {
 	Text   string `json:"text"`
 	Source string `json:"source"`
 }
 
+// clusterJSON é um grupo de avistamentos do mapa gravado.
 type clusterJSON struct {
 	Lat       float64 `json:"lat"`
 	Lng       float64 `json:"lng"`
@@ -53,6 +67,8 @@ type clusterJSON struct {
 	Precision float64 `json:"precision"`
 }
 
+// speciesJSON é a espécie completa gravada. SizeCm, Diet e Audio são
+// ponteiros para o "não existe" virar null no JSON e voltar como nil.
 type speciesJSON struct {
 	ID           string        `json:"id"`
 	Scientific   string        `json:"scientificName"`
@@ -71,6 +87,8 @@ type speciesJSON struct {
 	Clusters     []clusterJSON `json:"clusters"`
 }
 
+// filtersJSON são os filtros gravados. As structs dentro da lista são
+// anônimas: só existem aqui, e não precisam de nome.
 type filtersJSON struct {
 	Biomes []struct {
 		Biome string `json:"biome"`
@@ -82,6 +100,8 @@ type filtersJSON struct {
 	} `json:"states"`
 }
 
+// As funções xxxTo convertem do domínio para o DTO (na gravação) e as
+// xxxFrom fazem o caminho de volta (na leitura).
 func creditTo(c domain.Credit) creditJSON {
 	return creditJSON{c.Author, c.License, c.Source, c.SourceURL}
 }

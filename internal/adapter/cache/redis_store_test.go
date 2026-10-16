@@ -1,3 +1,5 @@
+// Testes de integração do RedisStore com um Redis de verdade, que roda num
+// container Docker criado pelo próprio teste.
 package cache_test
 
 import (
@@ -11,6 +13,10 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/cache"
 )
 
+// startRedis sobe um Redis 8 num container com o testcontainers e devolve o
+// cliente e o container. O testcontainers cria e destrói containers a partir
+// do código Go. Com "go test -short", os testes de integração são pulados
+// (para quem não tem Docker).
 func startRedis(t *testing.T) (*redis.Client, *tcredis.RedisContainer) {
 	t.Helper()
 	if testing.Short() {
@@ -34,6 +40,8 @@ func startRedis(t *testing.T) (*redis.Client, *tcredis.RedisContainer) {
 	return c, ctr
 }
 
+// Chave ausente não é erro; o que se grava é o que se lê; e o TTL pedido é
+// aplicado no Redis.
 func TestRedisStore_GetSetAndTTL(t *testing.T) {
 	client, _ := startRedis(t)
 	st := cache.NewRedisStore(client, 500*time.Millisecond)
@@ -53,6 +61,8 @@ func TestRedisStore_GetSetAndTTL(t *testing.T) {
 	}
 }
 
+// Com o container parado, o Get devolve erro rápido, dentro do prazo próprio
+// do RedisStore, em vez de travar a requisição.
 func TestRedisStore_RedisDownReturnsErrorQuickly(t *testing.T) {
 	client, ctr := startRedis(t)
 	st := cache.NewRedisStore(client, 200*time.Millisecond)

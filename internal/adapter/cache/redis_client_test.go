@@ -1,3 +1,5 @@
+// Testes do NewRedisClient: o prazo vale até para um servidor que não
+// responde, e a URL (que pode ter senha) nunca aparece no erro.
 package cache_test
 
 import (
@@ -43,6 +45,7 @@ func TestNewRedisClient_SilentServerIsBoundedByTimeout(t *testing.T) {
 	}
 }
 
+// Uma URL inválida gera um erro que cita REDIS_URL e não repete o valor.
 func TestNewRedisClient_InvalidURLNeverEchoesTheValue(t *testing.T) {
 	_, err := cache.NewRedisClient("isto-nao-e-url://:senha-secreta@host", time.Second)
 	if err == nil || strings.Contains(err.Error(), "senha-secreta") || !strings.Contains(err.Error(), "REDIS_URL") {
