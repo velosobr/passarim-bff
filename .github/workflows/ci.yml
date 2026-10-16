@@ -48,3 +48,16 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+
+  # Frente 0 do Passarim: nas branches que só comentam o código, garante que
+  # nenhuma linha de código mudou (scripts/check-comment-only.sh).
+  comentarios:
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'docs/comentarios-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # O histórico inteiro é necessário para comparar com a base do PR.
+          fetch-depth: 0
+      - run: bash scripts/check-comment-only_test.sh
+      - run: bash scripts/check-comment-only.sh origin/${{ github.base_ref }}
