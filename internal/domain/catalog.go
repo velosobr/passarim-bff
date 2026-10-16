@@ -53,8 +53,8 @@ func ParseBiome(s string) (Biome, bool) {
 //
 // A IUCN (União Internacional para a Conservação da Natureza) classifica o
 // risco de extinção de cada espécie: LC (pouco preocupante), NT, VU, EN, CR,
-// EW, EX e DD (dados insuficientes). O BFF só repassa o código que o catalog
-// manda; quem traduz para texto é o app.
+// EW, EX e DD (dados insuficientes). O domínio guarda só o código; o rótulo
+// em português ("Vulnerável") é acrescentado na resposta pelo adapter HTTP.
 type ConservationStatus string
 
 // As 27 unidades federativas: 26 estados + Distrito Federal.

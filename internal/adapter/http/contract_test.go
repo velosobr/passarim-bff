@@ -1,3 +1,6 @@
+// Testes de contrato: respostas reais da pilha HTTP completa são conferidas
+// contra o openapi.yaml, com a biblioteca kin-openapi. Se o código e o
+// documento do contrato divergirem, a CI quebra.
 package httpadapter_test
 
 import (
@@ -33,6 +36,7 @@ type stubCatalog struct {
 	err     error
 }
 
+// Os três métodos devolvem o que o cenário configurou.
 func (s *stubCatalog) ListSpecies(context.Context, domain.ListQuery) (domain.SpeciesPage, error) {
 	return s.page, s.err
 }
@@ -41,9 +45,11 @@ func (s *stubCatalog) GetSpecies(context.Context, string) (domain.Species, error
 }
 func (s *stubCatalog) ListFilters(context.Context) (domain.Filters, error) { return s.filters, s.err }
 
+// Garante, na compilação, que o stub satisfaz a porta.
 var _ usecase.CatalogReader = (*stubCatalog)(nil)
 
 // stack monta a MESMA pilha do main: middlewares + roteador + casos de uso reais.
+// O rate limit usa um IP fixo e o balde (burst) que o teste pedir.
 func stack(t *testing.T, cat usecase.CatalogReader, burst int) (http.Handler, *httpadapter.Handler) {
 	t.Helper()
 	log := slog.New(slog.DiscardHandler)
@@ -63,6 +69,8 @@ func stack(t *testing.T, cat usecase.CatalogReader, burst int) (http.Handler, *h
 		middleware.SecurityHeaders(), rl.Middleware(), middleware.Limits()), h
 }
 
+// loadSpec carrega e valida o openapi.yaml e monta um roteador que acha a
+// operação do contrato correspondente a cada requisição.
 func loadSpec(t *testing.T) (*openapi3.T, routers.Router) {
 	t.Helper()
 	doc, err := openapi3.NewLoader().LoadFromFile("../../../openapi.yaml")
@@ -97,6 +105,7 @@ func validate(t *testing.T, router routers.Router, req *http.Request, rec *httpt
 	}
 }
 
+// fullSpecies é uma espécie com todos os campos preenchidos.
 func fullSpecies() domain.Species {
 	size, diet := 23, "Frutos e insetos"
 	return domain.Species{
@@ -129,6 +138,9 @@ func validateProblemSchema(t *testing.T, doc *openapi3.T, rec *httptest.Response
 	}
 }
 
+// Cada cenário (sucesso, erros, rota inexistente, método errado) gera uma
+// resposta real, validada contra o contrato. t.Run cria um subteste com
+// nome, que aparece separado na saída.
 func TestContract_ResponsesMatchOpenAPI(t *testing.T) {
 	doc, router := loadSpec(t)
 	unavailable := domain.NewError(domain.KindUnavailable, errors.New("segredo-interno"))
@@ -175,6 +187,8 @@ func TestContract_ResponsesMatchOpenAPI(t *testing.T) {
 	}
 }
 
+// Com o balde de uma ficha, a segunda requisição recebe 429, no formato do
+// contrato.
 func TestContract_RateLimited429(t *testing.T) {
 	_, router := loadSpec(t)
 	h, _ := stack(t, &stubCatalog{}, 1) // balde de 1 ficha
@@ -191,6 +205,8 @@ func TestContract_RateLimited429(t *testing.T) {
 	validate(t, router, lastReq, last)
 }
 
+// Um pânico dentro de um caso de uso vira 500 no formato do contrato, e o
+// processo não cai.
 func TestContract_Panic500(t *testing.T) {
 	_, router := loadSpec(t)
 	h, _ := stack(t, panicCatalog{&stubCatalog{}}, 100)
@@ -203,6 +219,7 @@ func TestContract_Panic500(t *testing.T) {
 	validate(t, router, req, rec)
 }
 
+// panicCatalog é um catalog que entra em pânico ao listar os filtros.
 type panicCatalog struct{ *stubCatalog }
 
 func (panicCatalog) ListFilters(context.Context) (domain.Filters, error) { panic("boom") }

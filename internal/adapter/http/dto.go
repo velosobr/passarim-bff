@@ -1,3 +1,4 @@
+// DTOs da API REST e as conversões do domínio para eles.
 package httpadapter
 
 import (
@@ -9,12 +10,20 @@ import (
 
 // DTOs = o contrato REST. São structs PRÓPRIAS: nunca serializamos o domínio
 // nem o proto (OWASP API3: só sai o que está listado aqui).
+//
+// OWASP API3 é o risco de "exposição excessiva de propriedades": serializar
+// uma struct interna inteira poderia vazar campos que o app não deveria ver.
+// Com DTOs próprios, um campo novo no domínio só sai na API se alguém o
+// acrescentar aqui, de propósito. Os nomes JSON (camelCase) são o contrato
+// descrito no openapi.yaml. Ponteiros viram null no JSON quando nil.
 
+// labelDTO é um código com o rótulo legível ("VU", "Vulnerável").
 type labelDTO struct {
 	Code  string `json:"code"`
 	Label string `json:"label"`
 }
 
+// creditDTO é o crédito de autoria.
 type creditDTO struct {
 	Author    string `json:"author"`
 	License   string `json:"license"`
@@ -22,6 +31,7 @@ type creditDTO struct {
 	SourceURL string `json:"sourceUrl"`
 }
 
+// summaryDTO é o card da lista. thumbnailUrl é null quando ainda não há foto.
 type summaryDTO struct {
 	ID                 string    `json:"id"`
 	CommonName         string    `json:"commonName"`
@@ -30,16 +40,19 @@ type summaryDTO struct {
 	ConservationStatus *labelDTO `json:"conservationStatus"`
 }
 
+// speciesPageDTO é uma página; nextCursor é null na última.
 type speciesPageDTO struct {
 	Items      []summaryDTO `json:"items"`
 	NextCursor *string      `json:"nextCursor"`
 }
 
+// factDTO é uma curiosidade.
 type factDTO struct {
 	Text   string `json:"text"`
 	Source string `json:"source"`
 }
 
+// photoDTO é uma foto com as URLs dos três tamanhos.
 type photoDTO struct {
 	ThumbURL  *string   `json:"thumbUrl"`
 	MediumURL *string   `json:"mediumUrl"`
@@ -49,12 +62,14 @@ type photoDTO struct {
 	Credit    creditDTO `json:"credit"`
 }
 
+// audioDTO é o canto, já com a URL pública.
 type audioDTO struct {
 	URL        string    `json:"url"`
 	DurationMs int       `json:"durationMs"`
 	Credit     creditDTO `json:"credit"`
 }
 
+// clusterDTO é um grupo de avistamentos do mapa.
 type clusterDTO struct {
 	Lat       float64 `json:"lat"`
 	Lng       float64 `json:"lng"`
@@ -62,12 +77,15 @@ type clusterDTO struct {
 	Precision float64 `json:"precision"`
 }
 
+// whereToFindDTO é a seção "Onde encontrar": UFs, biomas e pontos do mapa.
 type whereToFindDTO struct {
 	States   []string     `json:"states"`
 	Biomes   []string     `json:"biomes"`
 	Clusters []clusterDTO `json:"clusters"`
 }
 
+// speciesDTO é a espécie completa da tela de detalhe. chips são os biomas
+// com rótulo, mostrados como etiquetas.
 type speciesDTO struct {
 	ID                 string         `json:"id"`
 	CommonName         string         `json:"commonName"`
@@ -85,6 +103,7 @@ type speciesDTO struct {
 	WhereToFind        whereToFindDTO `json:"whereToFind"`
 }
 
+// biomeCountDTO e stateCountDTO são as opções de filtro com as contagens.
 type biomeCountDTO struct {
 	Code         string `json:"code"`
 	Label        string `json:"label"`
@@ -96,11 +115,14 @@ type stateCountDTO struct {
 	SpeciesCount int    `json:"speciesCount"`
 }
 
+// filtersDTO é a resposta de /v1/filters.
 type filtersDTO struct {
 	Biomes []biomeCountDTO `json:"biomes"`
 	States []stateCountDTO `json:"states"`
 }
 
+// conservationDTO devolve o código com o rótulo, ou nil para status
+// desconhecido (o app não mostra selo).
 func conservationDTO(s domain.ConservationStatus) *labelDTO {
 	label, ok := conservationLabels[s]
 	if !ok {
@@ -109,10 +131,12 @@ func conservationDTO(s domain.ConservationStatus) *labelDTO {
 	return &labelDTO{Code: string(s), Label: label}
 }
 
+// toCredit copia o crédito do domínio para o DTO.
 func toCredit(c domain.Credit) creditDTO {
 	return creditDTO{Author: c.Author, License: c.License, Source: c.Source, SourceURL: c.SourceURL}
 }
 
+// toPageDTO monta a página, já trocando as chaves de mídia por URLs.
 func toPageDTO(ctx context.Context, p domain.SpeciesPage, m *media.Builder) speciesPageDTO {
 	out := speciesPageDTO{Items: make([]summaryDTO, 0, len(p.Items))}
 	for _, s := range p.Items {
@@ -125,6 +149,9 @@ func toPageDTO(ctx context.Context, p domain.SpeciesPage, m *media.Builder) spec
 	return out
 }
 
+// toSpeciesDTO monta a espécie. As listas são criadas com make, mesmo
+// vazias, para saírem como [] no JSON, e não como null: o app pode percorrê-
+// las sem conferir null.
 func toSpeciesDTO(ctx context.Context, s domain.Species, m *media.Builder) speciesDTO {
 	out := speciesDTO{
 		ID: s.ID, CommonName: s.CommonName, ScientificName: s.ScientificName, Family: s.Family,
@@ -157,6 +184,7 @@ func toSpeciesDTO(ctx context.Context, s domain.Species, m *media.Builder) speci
 	return out
 }
 
+// toFiltersDTO monta os filtros, com o rótulo de cada bioma.
 func toFiltersDTO(f domain.Filters) filtersDTO {
 	out := filtersDTO{Biomes: make([]biomeCountDTO, 0, len(f.Biomes)), States: make([]stateCountDTO, 0, len(f.States))}
 	for _, b := range f.Biomes {

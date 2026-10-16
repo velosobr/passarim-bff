@@ -1,3 +1,5 @@
+// Testes do handler HTTP com casos de uso falsos: formato das respostas,
+// null contra [], cabeçalhos e a tradução de cada tipo de erro em status.
 package httpadapter_test
 
 import (
@@ -23,6 +25,8 @@ type fakeList struct {
 	got  domain.RawListQuery
 }
 
+// Cada fake guarda o que recebeu (quando importa) e devolve o que o teste
+// configurou.
 func (f *fakeList) Run(_ context.Context, raw domain.RawListQuery) (domain.SpeciesPage, error) {
 	f.got = raw
 	return f.page, f.err
@@ -42,8 +46,10 @@ type fakeFilters struct {
 
 func (f *fakeFilters) Run(context.Context) (domain.Filters, error) { return f.f, f.err }
 
+// base é a MEDIA_BASE_URL dos testes.
 const base = "http://localhost:8888/buckets/passarim-media"
 
+// newHandler monta só as rotas (sem middlewares) com os fakes.
 func newHandler(t *testing.T, l *fakeList, g *fakeGet, f *fakeFilters) http.Handler {
 	t.Helper()
 	m, err := media.New(base, slog.New(slog.DiscardHandler))
@@ -54,6 +60,8 @@ func newHandler(t *testing.T, l *fakeList, g *fakeGet, f *fakeFilters) http.Hand
 	return h.Routes()
 }
 
+// do faz uma requisição na memória e devolve a resposta gravada. O
+// httptest dispensa servidor e porta: chama o handler direto.
 func do(h http.Handler, method, target string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, target, nil)
 	req = req.WithContext(reqmeta.With(req.Context(), reqmeta.New("req-1")))
@@ -62,6 +70,8 @@ func do(h http.Handler, method, target string) *httptest.ResponseRecorder {
 	return rec
 }
 
+// decode lê o corpo JSON como um mapa genérico, para o teste olhar os campos
+// pelo nome exato do contrato.
 func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	t.Helper()
 	var m map[string]any
@@ -71,6 +81,9 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	return m
 }
 
+// A lista sai com o Content-Type certo, a URL completa da miniatura, o
+// status de conservação com rótulo e null nos campos ausentes. O handler
+// repassa os parâmetros crus (quem valida é o caso de uso).
 func TestListSpecies_OK(t *testing.T) {
 	l := &fakeList{page: domain.SpeciesPage{Items: []domain.Summary{
 		{ID: "turdus-rufiventris", CommonName: "Sabiá-laranjeira", ScientificName: "Turdus rufiventris", ThumbnailKey: "species/turdus-rufiventris/photo-1-thumb.webp", Conservation: "LC"},
@@ -100,6 +113,7 @@ func TestListSpecies_OK(t *testing.T) {
 	}
 }
 
+// Lista vazia sai como [], e não como null.
 func TestListSpecies_EmptyListIsArrayNotNull(t *testing.T) {
 	rec := do(newHandler(t, &fakeList{}, &fakeGet{}, &fakeFilters{}), "GET", "/v1/species")
 	if !strings.Contains(rec.Body.String(), `"items":[]`) {
@@ -107,6 +121,7 @@ func TestListSpecies_EmptyListIsArrayNotNull(t *testing.T) {
 	}
 }
 
+// O cursor da próxima página chega ao JSON.
 func TestListSpecies_NextCursor(t *testing.T) {
 	l := &fakeList{page: domain.SpeciesPage{NextCursor: "abc"}}
 	if body := decode(t, do(newHandler(t, l, &fakeGet{}, &fakeFilters{}), "GET", "/v1/species")); body["nextCursor"] != "abc" {
@@ -114,6 +129,7 @@ func TestListSpecies_NextCursor(t *testing.T) {
 	}
 }
 
+// Um parâmetro repetido é informado ao caso de uso, que o recusa.
 func TestListSpecies_RepeatedParamIsInvalid(t *testing.T) {
 	l := &fakeList{}
 	rec := do(newHandler(t, l, &fakeGet{}, &fakeFilters{}), "GET", "/v1/species?state=SP&state=RJ")
@@ -123,6 +139,8 @@ func TestListSpecies_RepeatedParamIsInvalid(t *testing.T) {
 	_ = rec
 }
 
+// Erro de validação vira 400 em problem+json, sem cache, com type, código,
+// requestId e a lista de campos inválidos.
 func TestInvalidParameter_400WithFields(t *testing.T) {
 	l := &fakeList{err: &domain.ValidationError{Fields: []domain.FieldError{{Field: "limit", Reason: "deve ser um inteiro entre 1 e 50"}, {Field: "state", Reason: "UF desconhecida"}}}}
 	rec := do(newHandler(t, l, &fakeGet{}, &fakeFilters{}), "GET", "/v1/species?limit=999&state=XX")
@@ -138,6 +156,7 @@ func TestInvalidParameter_400WithFields(t *testing.T) {
 	}
 }
 
+// A espécie completa sai com todas as seções do contrato.
 func TestGetSpecies_FullDetail(t *testing.T) {
 	size, diet := 23, "Frutos e insetos"
 	g := &fakeGet{sp: domain.Species{
@@ -178,6 +197,8 @@ func TestGetSpecies_FullDetail(t *testing.T) {
 	}
 }
 
+// Numa espécie quase vazia, os campos opcionais estão presentes e null, e
+// as listas estão presentes e vazias. O app pode confiar nesse formato.
 func TestGetSpecies_NullablesAndEmptyArrays(t *testing.T) {
 	rec := do(newHandler(t, &fakeList{}, &fakeGet{sp: domain.Species{ID: "x"}}, &fakeFilters{}), "GET", "/v1/species/x")
 	b := decode(t, rec)
@@ -199,6 +220,8 @@ func TestGetSpecies_NullablesAndEmptyArrays(t *testing.T) {
 	}
 }
 
+// Espécie inexistente vira 404 SPECIES_NOT_FOUND; id inválido vira 400
+// apontando o campo id.
 func TestGetSpecies_NotFoundAndInvalidID(t *testing.T) {
 	g := &fakeGet{err: domain.NewError(domain.KindNotFound, errors.New("x"))}
 	rec := do(newHandler(t, &fakeList{}, g, &fakeFilters{}), "GET", "/v1/species/nao-existe")
@@ -212,6 +235,7 @@ func TestGetSpecies_NotFoundAndInvalidID(t *testing.T) {
 	}
 }
 
+// Os filtros saem com código, rótulo e contagem.
 func TestListFilters_OK(t *testing.T) {
 	f := &fakeFilters{f: domain.Filters{
 		Biomes: []domain.BiomeCount{{Biome: domain.BiomePampa, SpeciesCount: 3}},
@@ -225,6 +249,8 @@ func TestListFilters_OK(t *testing.T) {
 	}
 }
 
+// Uma resposta de sucesso pode ficar 60 s em cache e diz de onde veio
+// (X-Cache: miss quando ninguém registrou nada).
 func TestSuccessHeaders(t *testing.T) {
 	rec := do(newHandler(t, &fakeList{}, &fakeGet{}, &fakeFilters{}), "GET", "/v1/species")
 	if rec.Header().Get("Cache-Control") != "public, max-age=60" || rec.Header().Get("X-Cache") != "miss" {
@@ -232,6 +258,8 @@ func TestSuccessHeaders(t *testing.T) {
 	}
 }
 
+// O X-Cache repete o que o decorator de cache gravou no registro da
+// requisição.
 func TestXCacheComesFromRequestMeta(t *testing.T) {
 	m, _ := media.New(base, slog.New(slog.DiscardHandler))
 	list := stubList(func(ctx context.Context, _ domain.RawListQuery) (domain.SpeciesPage, error) {
@@ -244,12 +272,15 @@ func TestXCacheComesFromRequestMeta(t *testing.T) {
 	}
 }
 
+// stubList é uma função que se passa pelo caso de uso: um tipo função com
+// o método Run, que só chama a própria função.
 type stubList func(context.Context, domain.RawListQuery) (domain.SpeciesPage, error)
 
 func (s stubList) Run(ctx context.Context, r domain.RawListQuery) (domain.SpeciesPage, error) {
 	return s(ctx, r)
 }
 
+// Uma rota inexistente responde 404 em problem+json, como as outras.
 func TestRouteNotFound_IsProblemJSON(t *testing.T) {
 	rec := do(newHandler(t, &fakeList{}, &fakeGet{}, &fakeFilters{}), "GET", "/v1/nada")
 	if b := decode(t, rec); rec.Code != 404 || b["code"] != "NOT_FOUND" || rec.Header().Get("Content-Type") != "application/problem+json" {
@@ -257,6 +288,7 @@ func TestRouteNotFound_IsProblemJSON(t *testing.T) {
 	}
 }
 
+// As quatro falhas do catalog viram 503 SERVICE_UNAVAILABLE.
 func TestUpstreamErrors_503(t *testing.T) {
 	for _, k := range []domain.Kind{domain.KindUnavailable, domain.KindTimeout, domain.KindUpstream, domain.KindCircuitOpen} {
 		g := &fakeGet{err: domain.NewError(k, errors.New("x"))}
@@ -267,6 +299,7 @@ func TestUpstreamErrors_503(t *testing.T) {
 	}
 }
 
+// Um bug ou um erro sem classificação vira 500 INTERNAL.
 func TestInternalAndUnknownErrors_500(t *testing.T) {
 	for _, err := range []error{domain.NewError(domain.KindInternal, nil), errors.New("qualquer coisa")} {
 		rec := do(newHandler(t, &fakeList{}, &fakeGet{err: err}, &fakeFilters{}), "GET", "/v1/species/x")
@@ -292,7 +325,9 @@ func TestCatalogInvalidArgument_MapsToFieldByMethod(t *testing.T) {
 	}
 }
 
-// Review Focus #5: nenhum texto interno chega ao cliente.
+// Nenhum texto interno chega ao cliente: com uma causa que contém uma URL
+// de banco com senha, nenhuma resposta, de nenhum tipo de erro, repete
+// qualquer pedaço dela.
 func TestErrors_NeverLeakInternalText(t *testing.T) {
 	secret := errors.New("segredo-interno: postgres://user:senha@10.0.0.5/db")
 	for _, k := range []domain.Kind{domain.KindUnavailable, domain.KindUpstream, domain.KindInternal, domain.KindNotFound, domain.KindInvalidArgument, domain.KindCircuitOpen} {
@@ -304,6 +339,7 @@ func TestErrors_NeverLeakInternalText(t *testing.T) {
 	}
 }
 
+// Cliente que desistiu: status 499 e nenhum corpo.
 func TestCanceledRequest_NoBodyAndStatus499(t *testing.T) {
 	g := &fakeGet{err: domain.NewError(domain.KindCanceled, context.Canceled)}
 	rec := do(newHandler(t, &fakeList{}, g, &fakeFilters{}), "GET", "/v1/species/x")
