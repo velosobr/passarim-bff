@@ -1,3 +1,4 @@
+// Testes dos valores válidos de bioma e de UF.
 package domain_test
 
 import (
@@ -6,6 +7,9 @@ import (
 	"github.com/velosobr/passarim-bff/internal/domain"
 )
 
+// Os seis códigos oficiais passam e voltam iguais; qualquer variação
+// (maiúscula, vazio, bioma inventado) é recusada. Se um código mudasse aqui
+// sem mudar no catalog, o filtro de bioma deixaria de funcionar.
 func TestParseBiome(t *testing.T) {
 	for _, code := range []string{"amazonia", "mata_atlantica", "cerrado", "caatinga", "pantanal", "pampa"} {
 		if b, ok := domain.ParseBiome(code); !ok || string(b) != code {
@@ -19,6 +23,8 @@ func TestParseBiome(t *testing.T) {
 	}
 }
 
+// "sp" vira "SP", uma sigla inexistente é recusada e a lista completa tem as
+// 27 UFs (26 estados e o Distrito Federal).
 func TestNormalizeUF(t *testing.T) {
 	if uf, ok := domain.NormalizeUF("sp"); !ok || uf != "SP" {
 		t.Errorf("sp → %q %v", uf, ok)
