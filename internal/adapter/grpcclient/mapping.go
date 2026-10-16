@@ -1,3 +1,5 @@
+// Conversão das mensagens do proto nos tipos do domínio, e dos códigos de
+// erro do gRPC nos Kinds do domínio.
 package grpcclient
 
 import (
@@ -13,6 +15,8 @@ import (
 	"github.com/velosobr/passarim-bff/internal/domain"
 )
 
+// biomeToProto liga cada bioma do domínio ao valor do enum do proto. É a
+// única tabela escrita à mão; a inversa é derivada dela.
 var biomeToProto = map[domain.Biome]catalogv1.Biome{
 	domain.BiomeAmazonia:      catalogv1.Biome_BIOME_AMAZONIA,
 	domain.BiomeMataAtlantica: catalogv1.Biome_BIOME_MATA_ATLANTICA,
@@ -22,6 +26,9 @@ var biomeToProto = map[domain.Biome]catalogv1.Biome{
 	domain.BiomePampa:         catalogv1.Biome_BIOME_PAMPA,
 }
 
+// biomeFromProto é a tabela inversa, montada uma vez quando o programa sobe:
+// "func() ... { ... }()" declara uma função e já a executa, e o resultado
+// fica na variável. Assim as duas direções nunca ficam diferentes.
 var biomeFromProto = func() map[catalogv1.Biome]domain.Biome {
 	m := make(map[catalogv1.Biome]domain.Biome, len(biomeToProto))
 	for d, p := range biomeToProto {
@@ -30,6 +37,8 @@ var biomeFromProto = func() map[catalogv1.Biome]domain.Biome {
 	return m
 }()
 
+// statusFromProto traduz o enum de conservação do proto no código IUCN que
+// a API REST expõe ("LC", "VU"...).
 var statusFromProto = map[catalogv1.ConservationStatus]domain.ConservationStatus{
 	catalogv1.ConservationStatus_CONSERVATION_STATUS_LC: "LC", catalogv1.ConservationStatus_CONSERVATION_STATUS_NT: "NT",
 	catalogv1.ConservationStatus_CONSERVATION_STATUS_VU: "VU", catalogv1.ConservationStatus_CONSERVATION_STATUS_EN: "EN",
@@ -42,6 +51,8 @@ func conservation(s catalogv1.ConservationStatus) domain.ConservationStatus {
 	return statusFromProto[s]
 }
 
+// credit copia um crédito do proto. Com c nil, os Get* devolvem "", então o
+// resultado é um crédito vazio, sem pânico.
 func credit(c *catalogv1.Credit) domain.Credit {
 	return domain.Credit{Author: c.GetAuthor(), License: c.GetLicense(), Source: c.GetSource(), SourceURL: c.GetSourceUrl()}
 }
@@ -52,10 +63,14 @@ type mapper struct {
 	log *slog.Logger
 }
 
+// warnDropped registra no log, com o request_id, um valor descartado: quem
+// investiga sabe que o catalog mandou algo que o BFF ainda não entende.
 func (m mapper) warnDropped(what, value string) {
 	m.log.WarnContext(m.ctx, "dado desconhecido do catalog descartado", "what", what, "value", value, "request_id", reqmeta.RequestID(m.ctx))
 }
 
+// biome converte um bioma do proto. ok = false quando o valor é
+// desconhecido, e então o bioma é deixado de fora da resposta.
 func (m mapper) biome(b catalogv1.Biome) (domain.Biome, bool) {
 	d, ok := biomeFromProto[b]
 	if !ok {
@@ -64,6 +79,7 @@ func (m mapper) biome(b catalogv1.Biome) (domain.Biome, bool) {
 	return d, ok
 }
 
+// uf normaliza e valida uma sigla de UF vinda do catalog.
 func (m mapper) uf(s string) (string, bool) {
 	uf, ok := domain.NormalizeUF(s)
 	if !ok {
@@ -72,11 +88,15 @@ func (m mapper) uf(s string) (string, bool) {
 	return uf, ok
 }
 
+// summary converte o resumo de uma espécie (o card da lista).
 func (m mapper) summary(s *catalogv1.SpeciesSummary) domain.Summary {
 	return domain.Summary{ID: s.GetId(), ScientificName: s.GetScientificName(), CommonName: s.GetCommonNamePt(),
 		ThumbnailKey: s.GetThumbnailKey(), Conservation: conservation(s.GetConservationStatus())}
 }
 
+// species converte a espécie completa. Os campos "optional" do proto chegam
+// como ponteiros; copiamos o valor para um ponteiro novo, para o domínio não
+// guardar referência à mensagem do proto.
 func (m mapper) species(s *catalogv1.Species) domain.Species {
 	out := domain.Species{
 		ID: s.GetId(), ScientificName: s.GetScientificName(), CommonName: s.GetCommonNamePt(), Family: s.GetFamily(),

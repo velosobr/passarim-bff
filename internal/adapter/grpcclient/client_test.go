@@ -1,3 +1,7 @@
+// Testes do cliente gRPC contra um catalog falso que roda na memória. Eles
+// conferem a tradução proto → domínio, o descarte de valores desconhecidos,
+// a tradução dos códigos de erro, o envio do request_id, a ausência de retry
+// próprio do gRPC e os erros de configuração de TLS.
 package grpcclient_test
 
 import (
@@ -24,6 +28,11 @@ import (
 )
 
 // fakeServer é um catalog de mentira: cada teste configura o que ele responde.
+//
+// Embutir catalogv1.UnimplementedCatalogServiceServer (o campo sem nome) dá à
+// struct todos os métodos do serviço, que respondem "não implementado"; o
+// fake só sobrescreve os três que usa. calls é atômico porque o servidor gRPC
+// atende em outra goroutine, e lastMD guarda os metadados recebidos.
 type fakeServer struct {
 	catalogv1.UnimplementedCatalogServiceServer
 	list    func(*catalogv1.ListSpeciesRequest) (*catalogv1.ListSpeciesResponse, error)
@@ -33,6 +42,8 @@ type fakeServer struct {
 	lastMD  metadata.MD
 }
 
+// Cada método conta a chamada, guarda os metadados (quando o teste precisa)
+// e devolve o que a função configurada no teste mandar.
 func (f *fakeServer) ListSpecies(ctx context.Context, r *catalogv1.ListSpeciesRequest) (*catalogv1.ListSpeciesResponse, error) {
 	f.calls.Add(1)
 	f.lastMD, _ = metadata.FromIncomingContext(ctx)
@@ -51,6 +62,12 @@ func (f *fakeServer) ListFilters(ctx context.Context, _ *catalogv1.ListFiltersRe
 }
 
 // start sobe o servidor em memória (bufconn: sem rede de verdade) e devolve o cliente do BFF.
+//
+// bufconn é uma "conexão de rede" que vive num buffer na memória (aqui, de
+// 1 MiB): o cliente e o servidor conversam por gRPC de verdade, sem abrir
+// porta nenhuma. O endereço "passthrough:///bufnet" é só um nome, e o
+// WithContextDialer troca a discagem real pela do buffer. t.Cleanup agenda
+// o desligamento para o fim de cada teste.
 func start(t *testing.T, srv *fakeServer) *grpcclient.Client {
 	t.Helper()
 	lis := bufconn.Listen(1 << 20)
@@ -67,6 +84,9 @@ func start(t *testing.T, srv *fakeServer) *grpcclient.Client {
 	return c
 }
 
+// Uma espécie completa do proto vira a espécie do domínio campo a campo. O
+// fake inclui um bioma UNSPECIFIED, um bioma de número 99 (que não existe) e
+// a UF "xx": os três somem da resposta, e o resto chega intacto.
 func TestGetSpecies_MapsProtoToDomain(t *testing.T) {
 	size, diet := int32(23), "Frutos e insetos"
 	srv := &fakeServer{get: func(r *catalogv1.GetSpeciesRequest) (*catalogv1.GetSpeciesResponse, error) {
@@ -101,6 +121,8 @@ func TestGetSpecies_MapsProtoToDomain(t *testing.T) {
 	}
 }
 
+// Ausências: conservação UNSPECIFIED vira "", áudio com chave vazia vira
+// "sem áudio" (nil), e tamanho e dieta ausentes ficam nil.
 func TestGetSpecies_UnspecifiedConservationIsEmpty_AudioMissingIsNil(t *testing.T) {
 	srv := &fakeServer{get: func(*catalogv1.GetSpeciesRequest) (*catalogv1.GetSpeciesResponse, error) {
 		return &catalogv1.GetSpeciesResponse{Species: &catalogv1.Species{Id: "x", Audio: &catalogv1.Audio{Key: ""}}}, nil
@@ -111,6 +133,7 @@ func TestGetSpecies_UnspecifiedConservationIsEmpty_AudioMissingIsNil(t *testing.
 	}
 }
 
+// Uma resposta OK sem espécie dentro é tratada como bug do catalog.
 func TestGetSpecies_EmptyResponseIsInternal(t *testing.T) {
 	srv := &fakeServer{get: func(*catalogv1.GetSpeciesRequest) (*catalogv1.GetSpeciesResponse, error) {
 		return &catalogv1.GetSpeciesResponse{}, nil // sem species: resposta inesperada
@@ -121,6 +144,8 @@ func TestGetSpecies_EmptyResponseIsInternal(t *testing.T) {
 	}
 }
 
+// Cada filtro da consulta chega ao pedido gRPC no campo certo, e a resposta
+// volta como uma página com os resumos e o cursor da próxima.
 func TestListSpecies_TranslatesRequestAndResponse(t *testing.T) {
 	var got *catalogv1.ListSpeciesRequest
 	srv := &fakeServer{list: func(r *catalogv1.ListSpeciesRequest) (*catalogv1.ListSpeciesResponse, error) {
@@ -145,6 +170,7 @@ func TestListSpecies_TranslatesRequestAndResponse(t *testing.T) {
 	}
 }
 
+// Nos filtros, o bioma UNSPECIFIED e a UF "ZZ" são descartados.
 func TestListFilters_DropsUnknownBiomeAndState(t *testing.T) {
 	srv := &fakeServer{filters: func() (*catalogv1.ListFiltersResponse, error) {
 		return &catalogv1.ListFiltersResponse{
@@ -158,7 +184,9 @@ func TestListFilters_DropsUnknownBiomeAndState(t *testing.T) {
 	}
 }
 
-// Cada código gRPC cai num Kind da tabela única (spec §5.3).
+// Cada código gRPC cai num Kind da tabela única (spec §5.3). O fake devolve
+// uma mensagem "interna", e o teste só olha o Kind: a mensagem do catalog
+// nunca deve decidir nada no BFF.
 func TestErrorCodesMapToKinds(t *testing.T) {
 	cases := map[codes.Code]domain.Kind{
 		codes.Unavailable: domain.KindUnavailable, codes.DeadlineExceeded: domain.KindTimeout,
@@ -177,6 +205,8 @@ func TestErrorCodesMapToKinds(t *testing.T) {
 	}
 }
 
+// O request_id do contexto chega ao catalog no metadado x-request-id, para
+// a mesma requisição poder ser seguida nos logs dos dois serviços.
 func TestSendsRequestIDMetadata(t *testing.T) {
 	srv := &fakeServer{get: func(*catalogv1.GetSpeciesRequest) (*catalogv1.GetSpeciesResponse, error) {
 		return &catalogv1.GetSpeciesResponse{Species: &catalogv1.Species{Id: "x"}}, nil
@@ -192,6 +222,8 @@ func TestSendsRequestIDMetadata(t *testing.T) {
 }
 
 // grpc.WithDisableRetry: o único retry do BFF é o nosso (camada resilience).
+// Com Unavailable, o cliente faz uma chamada só; quem repete é o decorator
+// de retry, que fica do lado de fora.
 func TestDoesNotRetryByItself(t *testing.T) {
 	srv := &fakeServer{get: func(*catalogv1.GetSpeciesRequest) (*catalogv1.GetSpeciesResponse, error) {
 		return nil, status.Error(codes.Unavailable, "x")
@@ -202,6 +234,10 @@ func TestDoesNotRetryByItself(t *testing.T) {
 	}
 }
 
+// Configurações de TLS erradas falham já no New (CA inexistente, CA que não
+// é certificado, par de certificado inválido), e sem TLS o cliente é criado
+// normalmente. 0o600 é a permissão do arquivo em octal: leitura e escrita só
+// para o dono.
 func TestTLSConfigErrors(t *testing.T) {
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "ca.pem")
