@@ -1,3 +1,5 @@
+// Testes do Setup do OpenTelemetry: desligado sem endpoint, preguiçoso com
+// endpoint e com erro para endpoint inválido.
 package telemetry_test
 
 import (
@@ -10,6 +12,8 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/telemetry"
 )
 
+// Sem endpoint não há erro nem exportador, mas o propagador continua
+// instalado: o traceparent recebido segue para o catalog mesmo assim.
 func TestSetup_DisabledWithoutEndpointStillInstallsPropagator(t *testing.T) {
 	shutdown, err := telemetry.Setup(context.Background(), "", "passarim-bff")
 	if err != nil {
@@ -29,6 +33,9 @@ func TestSetup_DisabledWithoutEndpointStillInstallsPropagator(t *testing.T) {
 	}
 }
 
+// Com um endpoint onde ninguém escuta, o Setup não falha, porque o
+// exportador só conecta quando tem o que enviar. O desligamento não pode
+// travar além do prazo.
 func TestSetup_WithEndpointCreatesProviderWithoutConnecting(t *testing.T) {
 	shutdown, err := telemetry.Setup(context.Background(), "http://127.0.0.1:1", "passarim-bff")
 	if err != nil {
@@ -39,6 +46,7 @@ func TestSetup_WithEndpointCreatesProviderWithoutConnecting(t *testing.T) {
 	_ = shutdown(ctx) // pode devolver erro de flush (ninguém escuta); o que importa é não travar
 }
 
+// Um endpoint que nem é URL é recusado na subida.
 func TestSetup_RejectsInvalidEndpoint(t *testing.T) {
 	if _, err := telemetry.Setup(context.Background(), "://lixo", "x"); err == nil {
 		t.Fatal("endpoint inválido deveria falhar")

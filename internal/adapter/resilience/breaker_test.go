@@ -1,3 +1,5 @@
+// Testes do circuit breaker: quando ele abre, quais erros contam, como ele
+// volta a fechar e o Kind que ele devolve quando está aberto.
 package resilience_test
 
 import (
@@ -9,12 +11,16 @@ import (
 	"github.com/velosobr/passarim-bff/internal/domain"
 )
 
+// fastBreaker usa os valores de produção, menos o tempo aberto, encurtado
+// para o teste não demorar.
 func fastBreaker() resilience.BreakerConfig {
 	c := resilience.DefaultBreakerConfig()
 	c.Timeout = 30 * time.Millisecond // em produção são 30 s; aqui 30 ms para o teste não demorar
 	return c
 }
 
+// newBreaker monta o breaker sobre um catalog roteirizado com os erros
+// dados e devolve uma função que faz uma chamada.
 func newBreaker(t *testing.T, cfg resilience.BreakerConfig, errs ...error) (*scripted, *recMetrics, func() error) {
 	t.Helper()
 	s, m := &scripted{errs: errs}, &recMetrics{}
@@ -22,6 +28,8 @@ func newBreaker(t *testing.T, cfg resilience.BreakerConfig, errs ...error) (*scr
 	return s, m, func() error { _, err := b.GetSpecies(context.Background(), "x"); return err }
 }
 
+// Com 5 falhas seguidas, o circuito abre: a 6ª chamada falha na hora com
+// CircuitOpen, sem chegar ao catalog, e a métrica vai para 2 (aberto).
 func TestBreaker_OpensAfter5ConsecutiveFailures(t *testing.T) {
 	s, m, call := newBreaker(t, fastBreaker(), kindErr(domain.KindUnavailable))
 	for i := 0; i < 5; i++ {
@@ -36,6 +44,8 @@ func TestBreaker_OpensAfter5ConsecutiveFailures(t *testing.T) {
 	}
 }
 
+// O circuito também abre pela proporção: 60% de falhas em pelo menos 10
+// chamadas, mesmo sem 5 seguidas.
 func TestBreaker_OpensOnFailureRatio(t *testing.T) {
 	// 6 falhas e 4 sucessos intercalados (nunca 5 seguidas): 60% em 10 chamadas. A ÚLTIMA precisa
 	// ser uma falha: o ReadyToTrip só é avaliado quando uma chamada falha.
@@ -50,7 +60,9 @@ func TestBreaker_OpensOnFailureRatio(t *testing.T) {
 	}
 }
 
-// Review Focus #4: cliente que desconecta e 404 NÃO são falha do catalog.
+// Cliente que desconecta e 404 NÃO são falha do catalog. Mesmo com 30
+// erros desses, o circuito continua fechado e todas as chamadas chegam ao
+// catalog.
 func TestBreaker_IgnoresNonInfrastructureErrors(t *testing.T) {
 	for _, k := range []domain.Kind{domain.KindNotFound, domain.KindInvalidArgument, domain.KindCanceled, domain.KindInternal} {
 		s, _, call := newBreaker(t, fastBreaker(), kindErr(k))
@@ -65,6 +77,9 @@ func TestBreaker_IgnoresNonInfrastructureErrors(t *testing.T) {
 	}
 }
 
+// O ciclo completo: abre com 5 falhas, espera o tempo aberto, deixa passar
+// as 3 chamadas de teste do meio-aberto e, como elas dão certo, fecha. O
+// time.Sleep aqui espera de verdade, porque o gobreaker usa o relógio real.
 func TestBreaker_HalfOpenThenClosesOnSuccess(t *testing.T) {
 	errs := []error{kindErr(domain.KindUnavailable), kindErr(domain.KindUnavailable), kindErr(domain.KindUnavailable), kindErr(domain.KindUnavailable), kindErr(domain.KindUnavailable), nil}
 	s, m, call := newBreaker(t, fastBreaker(), errs...)
@@ -89,6 +104,8 @@ func TestBreaker_HalfOpenThenClosesOnSuccess(t *testing.T) {
 	}
 }
 
+// O erro de circuito aberto libera o dado velho do cache e não conta como
+// falha do catalog (senão o breaker se manteria aberto sozinho).
 func TestBreaker_WrapsErrorsAsCircuitOpenKind(t *testing.T) {
 	_, _, call := newBreaker(t, fastBreaker(), kindErr(domain.KindUnavailable))
 	for i := 0; i < 5; i++ {

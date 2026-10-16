@@ -1,3 +1,5 @@
+// Testes das métricas do Prometheus: cada evento vira a linha certa no
+// /metrics, com os nomes e os rótulos esperados pelos painéis do Grafana.
 package metrics_test
 
 import (
@@ -11,11 +13,15 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/metrics"
 )
 
+// Conferência em tempo de compilação: *Prom implementa as duas interfaces
+// que o BFF usa (a da cadeia de resiliência e a do log de acesso HTTP).
 var (
 	_ metrics.Metrics     = (*metrics.Prom)(nil)
 	_ middleware.Observer = (*metrics.Prom)(nil)
 )
 
+// scrape faz o que o Prometheus faz: um GET em /metrics, devolvendo o texto
+// da resposta. httptest grava a resposta na memória, sem servidor de verdade.
 func scrape(t *testing.T, p *metrics.Prom) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -24,6 +30,8 @@ func scrape(t *testing.T, p *metrics.Prom) string {
 	return string(b)
 }
 
+// Os eventos do cache, do breaker e do retry aparecem com os nomes e os
+// rótulos certos. Os painéis e os alertas dependem destes nomes.
 func TestProm_ChainMetrics(t *testing.T) {
 	p := metrics.NewProm()
 	p.CacheResult("hit")
@@ -48,6 +56,8 @@ func TestProm_ChainMetrics(t *testing.T) {
 	}
 }
 
+// As métricas HTTP usam o padrão da rota ("GET /v1/species/{id}"), e não o
+// caminho real com o id, para não criar uma série por espécie.
 func TestProm_HTTPMetricsUseRoutePatternAndStringStatus(t *testing.T) {
 	p := metrics.NewProm()
 	p.ObserveHTTP("GET /v1/species/{id}", "GET", 404, 12*time.Millisecond)
@@ -66,6 +76,8 @@ func TestProm_HTTPMetricsUseRoutePatternAndStringStatus(t *testing.T) {
 	}
 }
 
+// Os gauges "ao vivo" valem 0 sem função e, depois, refletem o valor atual a
+// cada coleta.
 func TestProm_GaugeFuncsReadLiveValues(t *testing.T) {
 	p := metrics.NewProm()
 	if !strings.Contains(scrape(t, p), "bff_rate_limiter_tracked_ips 0") {
@@ -84,6 +96,7 @@ func TestProm_GaugeFuncsReadLiveValues(t *testing.T) {
 	}
 }
 
+// As métricas do runtime do Go (como go_goroutines) também são expostas.
 func TestProm_ExposesGoRuntimeMetrics(t *testing.T) {
 	if !strings.Contains(scrape(t, metrics.NewProm()), "go_goroutines") {
 		t.Fatal("o coletor padrão de runtime Go deveria estar registrado")
