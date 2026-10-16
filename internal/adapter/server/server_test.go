@@ -1,3 +1,6 @@
+// Testes do servidor: a ordem do desligamento gracioso, a porta separada das
+// métricas, a falha de um servidor, os timeouts e o healthcheck.
+
 package server_test
 
 import (
@@ -13,6 +16,8 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/server"
 )
 
+// listen abre uma porta livre qualquer: a porta 0 pede ao sistema
+// operacional que escolha uma.
 func listen(t *testing.T) net.Listener {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -22,6 +27,7 @@ func listen(t *testing.T) net.Listener {
 	return l
 }
 
+// get faz um GET com prazo de 2 s e devolve só o status.
 func get(url string) (int, error) {
 	c := &http.Client{Timeout: 2 * time.Second}
 	resp, err := c.Get(url)
@@ -87,6 +93,7 @@ func TestRun_GracefulShutdownSequence(t *testing.T) {
 	}
 }
 
+// O /metrics responde na porta de métricas e não existe na porta da API.
 func TestRun_ServesMetricsOnSeparateListener(t *testing.T) {
 	api, metr := listen(t), listen(t)
 	api2 := http.NewServeMux()
@@ -108,6 +115,8 @@ func TestRun_ServesMetricsOnSeparateListener(t *testing.T) {
 	<-done
 }
 
+// Se um dos servidores não consegue servir (aqui, a porta de métricas foi
+// fechada antes), Run desliga tudo e devolve o erro.
 func TestRun_ReturnsErrorWhenAServerFails(t *testing.T) {
 	api := listen(t)
 	metr := listen(t)
@@ -119,6 +128,7 @@ func TestRun_ReturnsErrorWhenAServerFails(t *testing.T) {
 	}
 }
 
+// Os timeouts e o limite de cabeçalhos estão com os valores combinados.
 func TestServerTimeoutsAreSet(t *testing.T) {
 	o := server.Options{}
 	hs := server.NewHTTPServer(o.Handler)
@@ -127,6 +137,8 @@ func TestServerTimeoutsAreSet(t *testing.T) {
 	}
 }
 
+// O healthcheck sai com 0 quando o /healthz responde 200 e com 1 nos outros
+// casos.
 func TestHealthcheck(t *testing.T) {
 	ok := listen(t)
 	go func() {

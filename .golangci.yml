@@ -10,4 +10,4 @@ linters:
     misspell:
       # O código é comentado em português; estas palavras são portuguesas
       # legítimas que o misspell confunde com erros de inglês.
-      ignore-rules: [variantes, argumentos, problemas, exponencial, convers, candidatas, autor, persistente, eles]
+      ignore-rules: [variantes, argumentos, problemas, exponencial, convers, candidatas, autor, persistente, eles, clientes, correspondente, presentes, calcular, devolvendo, operacional, internacional]
