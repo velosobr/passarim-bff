@@ -1,3 +1,5 @@
+// Caso de uso da tela Explorar: a lista paginada, com busca e filtros.
+
 package usecase
 
 import (
@@ -15,6 +17,9 @@ type ListSpecies struct {
 	Budget  time.Duration
 }
 
+// Run valida e normaliza os parâmetros crus da URL e, se estiver tudo certo,
+// pede a página ao catalog dentro do orçamento. Com parâmetro inválido,
+// devolve o *ValidationError sem chamar o catalog.
 func (u ListSpecies) Run(ctx context.Context, raw domain.RawListQuery) (domain.SpeciesPage, error) {
 	q, err := domain.NewListQuery(raw)
 	if err != nil {

@@ -1,3 +1,16 @@
+// Implementação das métricas com o Prometheus.
+//
+// Os tipos de métrica usados aqui:
+//   - Counter: um contador que só sobe (total de requisições, de retries).
+//   - Gauge: um valor que sobe e desce (estado do breaker, IPs rastreados).
+//   - Histogram: distribui medidas em faixas ("buckets") de duração, para
+//     calcular, por exemplo, quanto tempo levam 95% das requisições.
+//
+// O sufixo "Vec" quer dizer "com rótulos" (labels): uma mesma métrica
+// separada por valores, como route="/v1/species" e status="200". Cada
+// combinação de rótulos é uma série guardada pelo Prometheus, por isso os
+// rótulos nunca levam dado livre do usuário (o que criaria séries sem fim).
+
 package metrics
 
 import (
@@ -12,7 +25,7 @@ import (
 )
 
 // Prom implementa Metrics (cadeia de resiliência) e middleware.Observer (HTTP) com Prometheus.
-// Usa um Registry PRÓPRIO (não o global): os testes não se atrapalham e só sai o que é nosso.
+// Usa um Registry PRÓPRIO (não o global): os testes não se atrapalham e só sai o que registramos aqui.
 type Prom struct {
 	reg      *prometheus.Registry
 	cache    *prometheus.CounterVec
@@ -28,8 +41,14 @@ type Prom struct {
 	conn    atomic.Pointer[func() float64]
 }
 
+// latencyBuckets são as faixas de duração dos histogramas, em segundos: de
+// 5 ms a 5 s.
 var latencyBuckets = []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5}
 
+// NewProm cria e registra todas as métricas. Além das nossas, registra as do
+// próprio Go (memória, goroutines) e as do processo (CPU, arquivos abertos).
+// MustRegister encerra com pânico se um nome se repetir, um erro de
+// programação que o teste pega na hora.
 func NewProm() *Prom {
 	p := &Prom{reg: prometheus.NewRegistry()}
 	p.cache = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "bff_cache_requests_total", Help: "Resultado do cache por requisição (hit, miss, stale, bypass, error)."}, []string{"result"})
@@ -46,6 +65,10 @@ func NewProm() *Prom {
 	return p
 }
 
+// loadFn devolve a função que o Prometheus chama a cada coleta: lê a função
+// guardada no ponteiro atômico e a executa (0 enquanto não houver nenhuma).
+// O ponteiro atômico permite trocar a função sem trava, com segurança, mesmo
+// com o Prometheus lendo ao mesmo tempo.
 func loadFn(ptr *atomic.Pointer[func() float64]) func() float64 {
 	return func() float64 {
 		if f := ptr.Load(); f != nil {
@@ -55,10 +78,14 @@ func loadFn(ptr *atomic.Pointer[func() float64]) func() float64 {
 	}
 }
 
+// SetTrackedIPs e SetConnState ligam os gauges "ao vivo" às funções que os
+// calculam; Handler é o que responde em /metrics.
 func (p *Prom) SetTrackedIPs(f func() float64) { p.tracked.Store(&f) }
 func (p *Prom) SetConnState(f func() float64)  { p.conn.Store(&f) }
 func (p *Prom) Handler() http.Handler          { return promhttp.HandlerFor(p.reg, promhttp.HandlerOpts{}) }
 
+// Os métodos abaixo implementam Metrics e o RateLimited do rate limit: cada
+// um incrementa um contador, muda um gauge ou registra uma duração.
 func (p *Prom) CacheResult(result string)  { p.cache.WithLabelValues(result).Inc() }
 func (p *Prom) BreakerState(state int)     { p.breaker.Set(float64(state)) }
 func (p *Prom) CatalogRetry(method string) { p.retries.WithLabelValues(method).Inc() }

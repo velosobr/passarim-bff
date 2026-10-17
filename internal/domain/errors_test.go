@@ -1,3 +1,6 @@
+// Testes da classificação de erros: a tabela de decisões de cada Kind e a
+// descoberta do Kind a partir de qualquer erro.
+
 package domain_test
 
 import (
@@ -9,7 +12,13 @@ import (
 	"github.com/velosobr/passarim-bff/internal/domain"
 )
 
-// Review Focus #4: a tabela é a única fonte de verdade sobre retry, breaker e stale.
+// A tabela é a única fonte de verdade sobre retry, breaker e stale: este
+// teste a escreve por extenso, Kind por Kind. Mudar uma decisão (por
+// exemplo, passar a repetir KindUpstream) exige mudar o teste junto, de
+// propósito.
+//
+// O formato "lista de casos + laço" é o "table-driven test", o estilo mais
+// comum de teste em Go: cada linha da tabela é um cenário.
 func TestKindTable(t *testing.T) {
 	cases := []struct {
 		kind                  domain.Kind
@@ -32,6 +41,9 @@ func TestKindTable(t *testing.T) {
 	}
 }
 
+// KindOf acha o Kind em erros diretos, em erros embrulhados com %w (o
+// fmt.Errorf com %w guarda o erro original para o errors.As achar), nos erros
+// de contexto e nos de validação. Um erro qualquer vira KindInternal.
 func TestKindOf(t *testing.T) {
 	cases := map[string]struct {
 		err  error
@@ -51,6 +63,8 @@ func TestKindOf(t *testing.T) {
 	}
 }
 
+// O *Error guarda a causa original, e errors.Is consegue achá-la através do
+// embrulho (graças ao método Unwrap).
 func TestErrorKeepsCauseForLogsButIsUnwrappable(t *testing.T) {
 	cause := errors.New("causa interna")
 	err := domain.NewError(domain.KindUpstream, cause)

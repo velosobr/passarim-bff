@@ -1,3 +1,6 @@
+// Testes do NewRedisClient: o prazo vale até para um servidor que não
+// responde, e a URL (que pode ter senha) nunca aparece no erro.
+
 package cache_test
 
 import (
@@ -10,9 +13,11 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/cache"
 )
 
-// Um servidor que aceita a conexão e fica calado (como o proxy de portas do Docker diante de um
-// container parado) não pode prender a requisição além do REDIS_TIMEOUT: o handshake do go-redis
-// usa DialTimeout (5 s por padrão), então o cliente precisa ser criado com o timeout configurado.
+// Um servidor que aceita a conexão e fica calado (como o proxy de portas do
+// Docker diante de um container parado) não pode prender a requisição além do
+// REDIS_TIMEOUT. O go-redis espera a resposta pelo ReadTimeout (5 s por
+// padrão), e não pelo prazo do contexto, então o cliente precisa ser criado
+// com o timeout configurado.
 func TestNewRedisClient_SilentServerIsBoundedByTimeout(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -43,6 +48,7 @@ func TestNewRedisClient_SilentServerIsBoundedByTimeout(t *testing.T) {
 	}
 }
 
+// Uma URL inválida gera um erro que cita REDIS_URL e não repete o valor.
 func TestNewRedisClient_InvalidURLNeverEchoesTheValue(t *testing.T) {
 	_, err := cache.NewRedisClient("isto-nao-e-url://:senha-secreta@host", time.Second)
 	if err == nil || strings.Contains(err.Error(), "senha-secreta") || !strings.Contains(err.Error(), "REDIS_URL") {

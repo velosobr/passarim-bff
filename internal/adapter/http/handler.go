@@ -1,5 +1,12 @@
 // Package httpadapter é a borda REST do BFF: rotas /v1, DTOs, erros
-// problem+json. Os middlewares (Task 5) ficam em ./middleware.
+// problem+json. Os middlewares ficam em ./middleware.
+//
+// REST é o estilo da API pública: cada recurso tem uma URL (/v1/species) e
+// é lido com GET, com respostas em JSON. O "/v1" no caminho é a versão da
+// API: uma mudança incompatível viraria /v2, sem quebrar os apps antigos.
+//
+// O nome do pacote é httpadapter (e não http) para não colidir com o
+// net/http da biblioteca padrão, que este pacote usa o tempo todo.
 package httpadapter
 
 import (
@@ -13,18 +20,25 @@ import (
 	"github.com/velosobr/passarim-bff/internal/domain"
 )
 
+// As três interfaces abaixo descrevem só o que o handler precisa de cada
+// caso de uso: um método Run. Os casos de uso do pacote usecase já as
+// satisfazem, e os testes as trocam por versões falsas.
 type SpeciesLister interface {
 	Run(ctx context.Context, raw domain.RawListQuery) (domain.SpeciesPage, error)
 }
 
+// SpeciesGetter é o caso de uso do detalhe.
 type SpeciesGetter interface {
 	Run(ctx context.Context, id string) (domain.Species, error)
 }
 
+// FiltersLister é o caso de uso dos filtros.
 type FiltersLister interface {
 	Run(ctx context.Context) (domain.Filters, error)
 }
 
+// Handler reúne o que as rotas usam: os três casos de uso, o montador de
+// URLs de mídia, o logger e a função de prontidão.
 type Handler struct {
 	List     SpeciesLister
 	Get      SpeciesGetter
@@ -59,8 +73,14 @@ func (h *Handler) Routes() http.Handler {
 	return mux
 }
 
+// listParams são os parâmetros aceitos na lista, conferidos um a um para
+// achar repetições.
 var listParams = []string{"q", "biome", "state", "cursor", "limit"}
 
+// listSpecies atende GET /v1/species. query.Get pega só o primeiro valor de
+// cada parâmetro; query[p] traz todos, e é por ele que detectamos a
+// repetição. Um InvalidArgument vindo do catalog aponta o cursor, o único
+// parâmetro que o BFF repassa sem conseguir validar por completo.
 func (h *Handler) listSpecies(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	raw := domain.RawListQuery{Q: query.Get("q"), Biome: query.Get("biome"), State: query.Get("state"), Cursor: query.Get("cursor"), Limit: query.Get("limit")}
@@ -77,6 +97,8 @@ func (h *Handler) listSpecies(w http.ResponseWriter, r *http.Request) {
 	h.ok(w, r, toPageDTO(r.Context(), page, h.Media))
 }
 
+// getSpecies atende GET /v1/species/{id}. r.PathValue lê o pedaço {id} do
+// padrão da rota.
 func (h *Handler) getSpecies(w http.ResponseWriter, r *http.Request) {
 	s, err := h.Get.Run(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -86,6 +108,7 @@ func (h *Handler) getSpecies(w http.ResponseWriter, r *http.Request) {
 	h.ok(w, r, toSpeciesDTO(r.Context(), s, h.Media))
 }
 
+// listFilters atende GET /v1/filters.
 func (h *Handler) listFilters(w http.ResponseWriter, r *http.Request) {
 	f, err := h.Filters.Run(r.Context())
 	if err != nil {
@@ -97,6 +120,10 @@ func (h *Handler) listFilters(w http.ResponseWriter, r *http.Request) {
 
 // ok escreve um 200 com os cabeçalhos de cache. O corpo é montado ANTES de
 // escrever, para um erro de serialização nunca deixar uma resposta pela metade.
+//
+// Cabeçalhos: Cache-Control deixa o app e proxies guardarem a resposta por
+// 60 s; X-Cache conta se a resposta veio do cache do BFF (hit, miss, stale),
+// útil para depurar.
 func (h *Handler) ok(w http.ResponseWriter, r *http.Request, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {

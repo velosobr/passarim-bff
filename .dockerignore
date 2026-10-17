@@ -1,3 +1,7 @@
+# Arquivos que NÃO entram no contexto do "docker build". Menos arquivos
+# deixa o build mais rápido, e nada de histórico do git, testes ou documentos
+# vai parar dentro da imagem.
+
 .git
 .github
 *.md

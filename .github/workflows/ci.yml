@@ -1,3 +1,7 @@
+# CI do BFF: roda a cada push na main e a cada pull request. São jobs
+# independentes, que o GitHub Actions executa em paralelo: testes, lint,
+# segurança e, nas branches de comentários, a verificação "só comentários".
+
 name: ci
 on:
   push:
@@ -5,6 +9,7 @@ on:
   pull_request:
 
 jobs:
+  # Testes e verificação de vulnerabilidades conhecidas nas dependências.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -18,6 +23,8 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
+  # Lint: o golangci-lint junta vários verificadores, configurados no
+  # .golangci.yml.
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -30,6 +37,8 @@ jobs:
         with:
           version: v2.14.0
 
+  # Segurança: o gitleaks procura segredos no histórico do git, e o Trivy
+  # procura vulnerabilidades na imagem Docker final.
   security:
     runs-on: ubuntu-latest
     steps:
@@ -48,3 +57,16 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+
+  # Nas branches docs/comentarios-*, que só comentam o código, garante que
+  # nenhuma linha de código mudou (scripts/check-comment-only.sh).
+  comentarios:
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'docs/comentarios-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # O histórico inteiro é necessário para comparar com a base do PR.
+          fetch-depth: 0
+      - run: bash scripts/check-comment-only_test.sh
+      - run: bash scripts/check-comment-only.sh origin/${{ github.base_ref }}

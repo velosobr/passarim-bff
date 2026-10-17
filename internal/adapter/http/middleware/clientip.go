@@ -1,3 +1,6 @@
+// Descoberta do IP real do cliente quando o BFF está atrás de um proxy (o
+// Traefik). O IP é usado no rate limit e no log de acesso.
+
 package middleware
 
 import (
@@ -8,6 +11,11 @@ import (
 )
 
 // IPResolver descobre o IP do CLIENTE de uma requisição.
+//
+// Atrás de um proxy, o IP da conexão é o do proxy. O IP original vem no
+// cabeçalho X-Forwarded-For, que cada proxy completa com o IP de quem o
+// chamou: "cliente, proxy1, proxy2". Só que qualquer um pode mandar esse
+// cabeçalho inventado, e daí as regras abaixo.
 type IPResolver func(*http.Request) string
 
 // NewIPResolver implementa a regra do IP real atrás de proxy (spec §7.4):
@@ -18,6 +26,7 @@ type IPResolver func(*http.Request) string
 //     (a mais à esquerda é a que o cliente controla).
 //  3. Entrada que não é IP válido, ou cabeçalho ausente: usamos o IP da conexão.
 func NewIPResolver(trusted []netip.Prefix, header string) IPResolver {
+	// isTrusted diz se o endereço está numa das redes de proxies confiáveis.
 	isTrusted := func(a netip.Addr) bool {
 		for _, p := range trusted {
 			if p.Contains(a) {
@@ -27,6 +36,7 @@ func NewIPResolver(trusted []netip.Prefix, header string) IPResolver {
 		return false
 	}
 	return func(r *http.Request) string {
+		// RemoteAddr vem como "ip:porta"; SplitHostPort separa as duas partes.
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
 			host = r.RemoteAddr
@@ -39,6 +49,7 @@ func NewIPResolver(trusted []netip.Prefix, header string) IPResolver {
 		if !isTrusted(conn) {
 			return conn.String()
 		}
+		// Junta todas as entradas do cabeçalho, mesmo vindo em várias linhas.
 		var entries []string
 		for _, v := range r.Header.Values(header) {
 			for _, part := range strings.Split(v, ",") {

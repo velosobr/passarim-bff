@@ -26,6 +26,18 @@ flowchart LR
 Dependências apontam para dentro (`domain` ← `usecase` ← `adapter`). Cada preocupação da cadeia de resiliência é um
 decorator sobre a porta `usecase.CatalogReader`, testável com um `CatalogReader` falso.
 
+## Por onde começar a ler
+
+O código é todo comentado para estudo. Uma ordem que conta a história de uma requisição, de fora para dentro:
+
+1. `cmd/bff/main.go`: como a aplicação é montada e desligada.
+2. `internal/domain`: os tipos e as regras, sem nenhuma tecnologia.
+3. `internal/usecase`: a porta `CatalogReader` e o que cada caso de uso valida.
+4. `internal/adapter/http` e `http/middleware`: as rotas `/v1`, os DTOs e a cadeia de middlewares.
+5. `internal/adapter/cache`, `resilience` e `grpcclient`: os decorators em volta da chamada ao catalog, na ordem em que a requisição passa por eles.
+6. `internal/adapter/media`, `metrics`, `telemetry`, `reqmeta` e `server`: as peças de apoio.
+7. Os `*_test.go` de cada pacote mostram o comportamento esperado em exemplos.
+
 ## Comandos
 
 | Comando | O que faz |

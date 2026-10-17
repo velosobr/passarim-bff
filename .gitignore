@@ -1,7 +1,14 @@
+# Arquivos que o git ignora: lixo do sistema e das IDEs, segredos locais e
+# binários compilados.
+
+# .DS_Store é criado pelo Finder do macOS; .idea e .vscode são das IDEs.
 .DS_Store
 .idea/
 .vscode/
+# .env guarda configuração local e pode ter senha: nunca vai para o
+# repositório. O .env.example (sem segredos) é a exceção, marcada com "!".
 .env
 .env.*
 !.env.example
+# Binários gerados por "go build".
 /bin/

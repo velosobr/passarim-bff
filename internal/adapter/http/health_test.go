@@ -1,3 +1,6 @@
+// Testes das rotas de saúde: o healthz responde sempre e o readyz só depende
+// do desligamento.
+
 package httpadapter_test
 
 import (
@@ -11,12 +14,16 @@ import (
 	"github.com/velosobr/passarim-bff/internal/domain"
 )
 
+// healthHandler monta as rotas com uma função de prontidão controlada pelo
+// teste.
 func healthHandler(t *testing.T, get *fakeGet, ready func() bool) http.Handler {
 	t.Helper()
 	m, _ := media.New(base, slog.New(slog.DiscardHandler))
 	return (&httpadapter.Handler{List: &fakeList{}, Get: get, Filters: &fakeFilters{}, Media: m, Log: slog.New(slog.DiscardHandler), Ready: ready}).Routes()
 }
 
+// O healthz responde 200 mesmo com o BFF "não pronto": ele só diz que o
+// processo está vivo.
 func TestHealthz_AlwaysOK(t *testing.T) {
 	rec := do(healthHandler(t, &fakeGet{}, func() bool { return false }), "GET", "/healthz")
 	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" {
@@ -24,7 +31,7 @@ func TestHealthz_AlwaysOK(t *testing.T) {
 	}
 }
 
-// Review Focus #2: o readyz NÃO consulta o catalog nem o Redis; se consultasse, com o catalog
+// O readyz NÃO consulta o catalog nem o Redis; se consultasse, com o catalog
 // fora do ar as duas réplicas sairiam do balanceador e o stale nunca seria servido.
 func TestReadyz_IgnoresCatalogAndRedis(t *testing.T) {
 	broken := &fakeGet{err: domain.NewError(domain.KindUnavailable, errors.New("catalog fora do ar"))}
@@ -34,6 +41,7 @@ func TestReadyz_IgnoresCatalogAndRedis(t *testing.T) {
 	}
 }
 
+// Durante o desligamento, o readyz passa a 503.
 func TestReadyz_503WhileShuttingDown(t *testing.T) {
 	shuttingDown := false
 	h := healthHandler(t, &fakeGet{}, func() bool { return !shuttingDown })
@@ -49,6 +57,7 @@ func TestReadyz_503WhileShuttingDown(t *testing.T) {
 	}
 }
 
+// As rotas de saúde estão na lista de padrões registrados.
 func TestHealthRoutesAreRegisteredPatterns(t *testing.T) {
 	m, _ := media.New(base, slog.New(slog.DiscardHandler))
 	h := &httpadapter.Handler{List: &fakeList{}, Get: &fakeGet{}, Filters: &fakeFilters{}, Media: m, Log: slog.New(slog.DiscardHandler)}

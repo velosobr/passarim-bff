@@ -1,6 +1,12 @@
 // Package telemetry liga o OpenTelemetry. Sem endpoint, o tracing fica DESLIGADO
 // (o BFF sobe normalmente), mas o propagador W3C continua instalado para o
 // traceparent recebido seguir até o catalog.
+//
+// Tracing distribuído: cada requisição ganha um "trace" com vários "spans"
+// (pedaços com início e fim: a requisição HTTP, a chamada gRPC). O id do
+// trace viaja entre os serviços no cabeçalho traceparent (padrão W3C), e
+// assim uma ferramenta como o Jaeger mostra o caminho inteiro de uma
+// requisição, do BFF ao catalog, com o tempo de cada parte.
 package telemetry
 
 import (
@@ -16,6 +22,11 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
+// Setup instala o propagador e, se houver endpoint, o exportador OTLP via
+// gRPC (OTLP é o protocolo padrão do OpenTelemetry para enviar traces a um
+// coletor, como o Jaeger). Devolve a função de desligamento, que envia os spans ainda no buffer
+// (o "batcher" junta vários spans antes de enviar, para gastar menos rede).
+// Com http:// a conexão com o coletor é sem TLS; com https://, com TLS.
 func Setup(ctx context.Context, endpoint, serviceName string) (func(context.Context) error, error) {
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 	if endpoint == "" {

@@ -1,6 +1,19 @@
 // Package cache é o decorator MAIS EXTERNO da cadeia: guarda as respostas do
 // catalog no Redis e, quando o catalog falha, serve o dado velho
 // (stale-while-error) em vez de um erro. Algoritmo e classificação de erros: spec §5.2 e §5.3.
+//
+// Os conceitos, em resumo (ADR-0016):
+//   - Fresco: uma resposta gravada há menos de FreshTTL (10 min por padrão) é
+//     devolvida direto, sem chamar o catalog.
+//   - Velho (stale): depois disso a resposta continua no Redis até StaleTTL
+//     (24 h). Ela não é usada quando o catalog responde, mas salva o app quando
+//     o catalog falha: um dado de horas atrás é melhor que uma tela de erro.
+//   - Envelope: o Redis guarda o dado junto com o horário em que foi gravado.
+//     É assim que o código decide se ele está fresco, sem depender do TTL do
+//     próprio Redis.
+//   - Singleflight: se cem pedidos iguais chegam juntos com o cache vencido,
+//     só um vai ao catalog e os outros esperam a mesma resposta. Isso evita a
+//     "manada" (thundering herd) que derrubaria o catalog bem quando ele volta.
 package cache
 
 import (
@@ -18,6 +31,9 @@ import (
 	"github.com/velosobr/passarim-bff/internal/usecase"
 )
 
+// Config são os tempos do cache. Now é a função que diz "que horas são";
+// os testes trocam por um relógio falso para simular a passagem do tempo sem
+// esperar de verdade.
 type Config struct {
 	FreshTTL time.Duration // até quando o dado é "fresco" (decidido em código, não pelo Redis)
 	StaleTTL time.Duration // TTL no Redis = janela em que o dado velho ainda pode ser servido
@@ -25,6 +41,9 @@ type Config struct {
 	Now      func() time.Time
 }
 
+// cache é o decorator: embrulha o próximo CatalogReader (next) e guarda as
+// respostas no store. Fica não exportado (minúsculo) porque quem está de
+// fora só precisa da interface que New devolve.
 type cache struct {
 	next  usecase.CatalogReader
 	store Store
@@ -34,6 +53,8 @@ type cache struct {
 	sf    singleflight.Group // por processo: cada réplica tem o seu
 }
 
+// New monta o decorator. Devolve usecase.CatalogReader, e não *cache, para
+// o resto do programa continuar falando só com a interface.
 func New(next usecase.CatalogReader, store Store, cfg Config, log *slog.Logger, m metrics.Metrics) usecase.CatalogReader {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -41,18 +62,29 @@ func New(next usecase.CatalogReader, store Store, cfg Config, log *slog.Logger, 
 	return &cache{next: next, store: store, cfg: cfg, log: log, m: m}
 }
 
-// envelope é o que fica no Redis: o dado + quando foi gravado.
+// envelope é o que fica no Redis: o dado + quando foi gravado. "[D any]" é
+// um parâmetro de tipo (generics): D é trocado pelo DTO real no uso. As tags
+// `json:"..."` dão o nome de cada campo no JSON gravado.
 type envelope[D any] struct {
 	StoredAt time.Time `json:"storedAt"`
 	Data     D         `json:"data"`
 }
 
+// flightResult leva o resultado do voo compartilhado (valor ou erro) a todos
+// os que estão esperando. O erro vai dentro do resultado, e não como erro do
+// singleflight, para cada chamador decidir sozinho se serve o dado velho.
+//
+// T é o tipo do domínio: uma espécie, uma página ou os filtros.
 type flightResult[T any] struct {
 	value T
 	err   error
 }
 
 // cached implementa o algoritmo da spec §5.2 para qualquer tipo T (domínio) / D (formato gravado).
+//
+// T é o tipo do domínio (o que o BFF usa) e D é o DTO gravado em JSON no
+// Redis; enc converte T em D e dec faz o caminho de volta. call é a chamada
+// real ao próximo da cadeia. Os passos numerados abaixo seguem a spec.
 func cached[T, D any](ctx context.Context, c *cache, key string, call func(context.Context) (T, error), enc func(T) D, dec func(D) T) (T, error) {
 	meta := reqmeta.From(ctx)
 	var zero T
@@ -101,8 +133,12 @@ func cached[T, D any](ctx context.Context, c *cache, key string, call func(conte
 	})
 
 	// 4. Cada chamador espera pelo resultado OU pela sua própria desistência.
+	// select espera o primeiro de vários canais que ficar pronto: aqui, o
+	// resultado do voo (ch) ou o fim do contexto deste chamador (ctx.Done()).
 	select {
 	case res := <-ch:
+		// res.Val é any; ".(flightResult[T])" é uma type assertion, que diz ao Go
+		// qual é o tipo real guardado ali.
 		fr := res.Val.(flightResult[T])
 		if fr.err == nil { // 5. sucesso
 			c.m.CacheResult("miss")
@@ -128,6 +164,8 @@ func cached[T, D any](ctx context.Context, c *cache, key string, call func(conte
 	}
 }
 
+// Os três métodos abaixo fazem do cache um CatalogReader: cada um só escolhe
+// a chave e as funções de conversão e delega a cached.
 func (c *cache) GetSpecies(ctx context.Context, id string) (domain.Species, error) {
 	return cached(ctx, c, speciesKey(id),
 		func(cx context.Context) (domain.Species, error) { return c.next.GetSpecies(cx, id) }, speciesTo, speciesFrom)

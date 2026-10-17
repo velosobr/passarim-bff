@@ -1,3 +1,6 @@
+// Credenciais de transporte da conexão gRPC com o catalog: sem criptografia
+// na rede privada local, TLS ou mTLS quando configurados.
+
 package grpcclient
 
 import (
@@ -12,11 +15,19 @@ import (
 
 // TLS: sem CAFile o cliente usa "insecure" (catalog na rede privada local).
 // Com CAFile liga TLS; com CertFile+KeyFile também apresenta certificado de
-// cliente (a base do mTLS, que será ligado na Etapa 4).
+// cliente (a base do mTLS).
+//
+// TLS cifra a conexão e prova a identidade do servidor: o BFF só confia no
+// catalog se o certificado dele foi assinado pela CA informada. No mTLS
+// ("TLS mútuo"), o BFF também apresenta um certificado, e o catalog pode
+// recusar clientes desconhecidos.
 type TLS struct {
 	CAFile, CertFile, KeyFile, ServerName string
 }
 
+// credentials monta as credenciais a partir dos arquivos. Os erros citam a
+// variável de ambiente, e não o caminho, como no resto da configuração. A
+// versão mínima é TLS 1.3, a mais nova e segura.
 func (t TLS) credentials() (credentials.TransportCredentials, error) {
 	if t.CAFile == "" {
 		return insecure.NewCredentials(), nil

@@ -1,3 +1,5 @@
+// Tradução dos erros classificados (Kind) em respostas HTTP.
+
 package httpadapter
 
 import (
@@ -13,6 +15,10 @@ import (
 const statusClientClosed = 499
 
 // fail é o ÚNICO lugar que traduz erro de domínio em resposta HTTP.
+// O mapa é: inválido → 400; não encontrado → 404; cliente desistiu → 499
+// (sem corpo); catalog com problema → 503; o resto → 500. Os 503 e 500 são
+// registrados no log com a causa, que nunca vai para a resposta.
+//
 // fieldHint diz qual parâmetro apontar quando o CATALOG reclama de InvalidArgument
 // ("cursor" na lista, "id" no detalhe); nunca repassamos a mensagem dele.
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error, fieldHint string) {

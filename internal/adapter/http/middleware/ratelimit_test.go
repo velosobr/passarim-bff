@@ -1,3 +1,6 @@
+// Testes do rate limit com relógio falso: rajada, 429, recarga do balde,
+// limite por IP, isenção das rotas de saúde, teto de IPs e limpeza.
+
 package middleware_test
 
 import (
@@ -10,11 +13,14 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/http/middleware"
 )
 
+// clock é um relógio controlado pelo teste.
 type clock struct{ now time.Time }
 
 func (c *clock) Now() time.Time          { return c.now }
 func (c *clock) Advance(d time.Duration) { c.now = c.now.Add(d) }
 
+// newLimiter monta o limitador com o IP lido de um cabeçalho de teste
+// (X-Test-IP), para cada requisição escolher o próprio IP.
 func newLimiter(t *testing.T, cfg middleware.RateLimitConfig, clk *clock) (*middleware.RateLimiter, http.Handler) {
 	t.Helper()
 	ip := func(r *http.Request) string { return r.Header.Get("X-Test-IP") }
@@ -23,6 +29,7 @@ func newLimiter(t *testing.T, cfg middleware.RateLimitConfig, clk *clock) (*midd
 	return rl, h
 }
 
+// hit faz uma requisição GET vinda do IP dado.
 func hit(h http.Handler, ip, path string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("GET", path, nil)
 	r.Header.Set("X-Test-IP", ip)
@@ -31,6 +38,8 @@ func hit(h http.Handler, ip, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
+// As 3 primeiras passam (a rajada), a 4ª recebe 429 com Retry-After e a
+// métrica é avisada; 200 ms depois, a 10 fichas por segundo, já há ficha.
 func TestRateLimit_BurstThen429WithRetryAfter(t *testing.T) {
 	clk := &clock{now: time.Unix(1_000_000, 0)}
 	limited := 0
@@ -56,6 +65,8 @@ func TestRateLimit_BurstThen429WithRetryAfter(t *testing.T) {
 	}
 }
 
+// Cada IP tem o seu balde, e as rotas de saúde passam mesmo com o balde
+// vazio.
 func TestRateLimit_PerIPAndExemptHealth(t *testing.T) {
 	clk := &clock{now: time.Unix(1_000_000, 0)}
 	_, h := newLimiter(t, middleware.RateLimitConfig{RPS: 1, Burst: 1, MaxIPs: 100, IdleAfter: time.Minute}, clk)
@@ -73,6 +84,8 @@ func TestRateLimit_PerIPAndExemptHealth(t *testing.T) {
 	}
 }
 
+// O Retry-After acompanha a taxa: a 0,25 ficha por segundo, uma ficha nova
+// leva 4 s, e é isso que o cabeçalho diz.
 func TestRateLimit_RetryAfterFollowsRate(t *testing.T) {
 	clk := &clock{now: time.Unix(1_000_000, 0)}
 	_, h := newLimiter(t, middleware.RateLimitConfig{RPS: 0.25, Burst: 1, MaxIPs: 10, IdleAfter: time.Minute}, clk)
@@ -104,6 +117,7 @@ func TestRateLimit_EvictsLeastRecentlyUsedAtCap(t *testing.T) {
 	}
 }
 
+// A limpeza esquece os IPs parados há mais que IdleAfter.
 func TestRateLimit_CleanupRemovesIdleIPs(t *testing.T) {
 	clk := &clock{now: time.Unix(1_000_000, 0)}
 	rl, h := newLimiter(t, middleware.RateLimitConfig{RPS: 1, Burst: 1, MaxIPs: 100, IdleAfter: 3 * time.Minute}, clk)

@@ -20,6 +20,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+// catalogDir acha a pasta do passarim-catalog (vizinha, por padrão) para
+// construir a imagem dele. Sem a pasta, o teste é pulado, e não reprovado.
 func catalogDir(t *testing.T) string {
 	t.Helper()
 	dir := os.Getenv("PASSARIM_CATALOG_DIR")
@@ -36,6 +38,7 @@ func catalogDir(t *testing.T) string {
 	return abs
 }
 
+// start sobe um container e agenda a remoção dele para o fim do teste.
 func start(t *testing.T, req testcontainers.ContainerRequest) testcontainers.Container {
 	t.Helper()
 	c, err := testcontainers.GenericContainer(context.Background(), testcontainers.GenericContainerRequest{ContainerRequest: req, Started: true})
@@ -46,6 +49,8 @@ func start(t *testing.T, req testcontainers.ContainerRequest) testcontainers.Con
 	return c
 }
 
+// reply é uma resposta HTTP já lida: status, cabeçalhos e o corpo como mapa
+// e como texto.
 type reply struct {
 	status  int
 	header  http.Header
@@ -53,6 +58,7 @@ type reply struct {
 	rawBody string
 }
 
+// get faz um GET no BFF que está no container e lê a resposta inteira.
 func get(t *testing.T, base, path string) reply {
 	t.Helper()
 	resp, err := http.Get(base + path)
@@ -66,6 +72,11 @@ func get(t *testing.T, base, path string) reply {
 	return reply{status: resp.StatusCode, header: resp.Header, body: body, rawBody: string(raw)}
 }
 
+// Sobe Postgres, Redis, o seed e o catalog (construído do código vizinho) e
+// o BFF, todos numa rede Docker própria, e confere o caminho completo: lista,
+// detalhe, 404, filtros e, com o catalog parado, o dado velho para o que já
+// estava no cache e 503 para o resto. O frescor do cache é de 1 s para o
+// teste não esperar 10 minutos.
 func TestE2E_BFFWithRealCatalog(t *testing.T) {
 	if testing.Short() {
 		t.Skip("e2e: precisa de Docker")

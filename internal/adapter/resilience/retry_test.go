@@ -1,3 +1,6 @@
+// Testes do retry, com relógio, espera e sorteio falsos: o teste roda
+// instantâneo e cada valor de tempo é previsível.
+
 package resilience_test
 
 import (
@@ -9,6 +12,8 @@ import (
 	"github.com/velosobr/passarim-bff/internal/domain"
 )
 
+// retryEnv guarda o catalog roteirizado, as esperas pedidas (waits), os
+// tetos de jitter pedidos (maxes), as métricas e o "agora" fixo do relógio.
 type retryEnv struct {
 	r     *scripted
 	waits []time.Duration
@@ -17,6 +22,8 @@ type retryEnv struct {
 	base  time.Time
 }
 
+// newRetry monta o retry com 2 retries, tentativas de até 2 s e um prazo de
+// 3 s por chamada. O jitter devolve sempre o teto, o pior caso.
 func newRetry(t *testing.T, errs ...error) (*retryEnv, func() error) {
 	t.Helper()
 	env := &retryEnv{r: &scripted{errs: errs}, m: &recMetrics{}, base: time.Now()}
@@ -35,6 +42,8 @@ func newRetry(t *testing.T, errs ...error) (*retryEnv, func() error) {
 	}
 }
 
+// Unavailable e Timeout são repetidos até dar certo na 3ª tentativa; todos
+// os outros Kinds falham na primeira, sem repetir.
 func TestRetry_RetriesOnlyUnavailableAndTimeout(t *testing.T) {
 	for _, k := range []domain.Kind{domain.KindUnavailable, domain.KindTimeout} {
 		env, call := newRetry(t, kindErr(k), kindErr(k), nil)
@@ -50,6 +59,7 @@ func TestRetry_RetriesOnlyUnavailableAndTimeout(t *testing.T) {
 	}
 }
 
+// Com falha sempre, são 3 chamadas (1 + 2 retries) e 2 retries na métrica.
 func TestRetry_GivesUpAfterMaxRetries(t *testing.T) {
 	env, call := newRetry(t, kindErr(domain.KindUnavailable))
 	err := call()
@@ -61,6 +71,7 @@ func TestRetry_GivesUpAfterMaxRetries(t *testing.T) {
 	}
 }
 
+// O teto da espera dobra a cada retry: 100 ms e depois 200 ms.
 func TestRetry_BackoffIsExponentialWithJitterBounds(t *testing.T) {
 	env, call := newRetry(t, kindErr(domain.KindUnavailable))
 	_ = call()
@@ -70,6 +81,8 @@ func TestRetry_BackoffIsExponentialWithJitterBounds(t *testing.T) {
 	}
 }
 
+// Com pouco tempo sobrando, o retry desiste em vez de fazer uma tentativa
+// que não teria tempo de terminar.
 func TestRetry_NoNewAttemptWithoutRemainingBudget(t *testing.T) {
 	env := &retryEnv{r: &scripted{errs: []error{kindErr(domain.KindUnavailable)}}, m: &recMetrics{}, base: time.Now()}
 	rd := resilience.NewRetry(env.r, resilience.RetryConfig{
@@ -85,6 +98,8 @@ func TestRetry_NoNewAttemptWithoutRemainingBudget(t *testing.T) {
 	}
 }
 
+// Cada tentativa tem o menor entre o limite da config (2 s) e o que resta do
+// prazo da requisição.
 func TestRetry_AttemptTimeoutIsMinOfConfigAndRemaining(t *testing.T) {
 	env, call := newRetry(t, nil)
 	_ = call()
@@ -102,6 +117,7 @@ func TestRetry_AttemptTimeoutIsMinOfConfigAndRemaining(t *testing.T) {
 	}
 }
 
+// Cada tentativa vira uma métrica com o método e o resultado.
 func TestRetry_RecordsAttemptMetricsPerMethodAndCode(t *testing.T) {
 	env, call := newRetry(t, kindErr(domain.KindUnavailable), nil)
 	_ = call()
@@ -110,6 +126,8 @@ func TestRetry_RecordsAttemptMetricsPerMethodAndCode(t *testing.T) {
 	}
 }
 
+// Se o cliente desiste durante a pausa, o retry para na hora e devolve
+// Canceled.
 func TestRetry_StopsWhenContextIsCanceledDuringBackoff(t *testing.T) {
 	env := &retryEnv{r: &scripted{errs: []error{kindErr(domain.KindUnavailable)}}, m: &recMetrics{}, base: time.Now()}
 	rd := resilience.NewRetry(env.r, resilience.RetryConfig{

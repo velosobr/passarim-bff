@@ -11,6 +11,8 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
+// page é o modelo da página HTML: o Swagger UI vem da CDN, e o %s recebe a
+// especificação inteira em JSON.
 const page = `<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><title>Passarim BFF — API</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui.min.css"></head>
@@ -23,6 +25,7 @@ SwaggerUIBundle({ spec, dom_id: '#ui', docExpansion: 'list', tryItOutEnabled: tr
 </script></body></html>
 `
 
+// main roda o gerador e sai com 1 em caso de erro.
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "swagger:", err)
@@ -30,6 +33,8 @@ func main() {
 	}
 }
 
+// run lê o openapi.yaml, troca o servidor pelo endereço local do docker
+// compose (para o "Try it out" funcionar) e grava docs/swagger.html.
 func run() error {
 	doc, err := openapi3.NewLoader().LoadFromFile("openapi.yaml")
 	if err != nil {

@@ -1,3 +1,6 @@
+// As rotas de saúde, usadas pelo Docker e pelo Traefik para saber se o BFF
+// está vivo e se pode receber tráfego.
+
 package httpadapter
 
 import "net/http"
@@ -10,6 +13,8 @@ func (h *Handler) healthz(w http.ResponseWriter, r *http.Request) {
 	plain(w, http.StatusOK, "ok")
 }
 
+// readyz responde 503 durante o desligamento, para o Traefik tirar esta
+// réplica do balanceamento antes de ela parar.
 func (h *Handler) readyz(w http.ResponseWriter, r *http.Request) {
 	if h.Ready != nil && !h.Ready() {
 		plain(w, http.StatusServiceUnavailable, "shutting down")
@@ -18,6 +23,7 @@ func (h *Handler) readyz(w http.ResponseWriter, r *http.Request) {
 	plain(w, http.StatusOK, "ready")
 }
 
+// plain escreve uma resposta de texto simples, sem cache.
 func plain(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

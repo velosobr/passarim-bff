@@ -1,3 +1,5 @@
+// O subcomando de healthcheck usado pelo HEALTHCHECK do Dockerfile.
+
 package server
 
 import (
@@ -18,6 +20,8 @@ func Healthcheck(httpAddr string) int {
 	if err != nil {
 		return 1
 	}
+	// A consulta tem 2 s no máximo; sem resposta nesse tempo, o container é
+	// considerado doente.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:"+port+"/healthz", nil)

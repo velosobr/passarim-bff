@@ -1,3 +1,18 @@
+// Circuit breaker do catalog. A ideia vem dos disjuntores elétricos: quando
+// o catalog começa a falhar muito, o breaker "abre" e passa a recusar as
+// chamadas na hora, sem esperar o catalog. Isso protege o catalog (que ganha
+// fôlego para se recuperar) e o BFF (que não fica preso esperando respostas
+// que não vêm; o cache serve o dado velho no lugar).
+//
+// Os três estados:
+//   - fechado: tudo normal, as chamadas passam e as falhas são contadas;
+//   - aberto: as chamadas são recusadas na hora, por Timeout (30 s);
+//   - meio-aberto: depois do Timeout, deixa passar até MaxRequests (3)
+//     chamadas de teste; com 3 sucessos seguidos, fecha; uma falha só já
+//     reabre.
+//
+// Usamos a biblioteca gobreaker, da Sony.
+
 package resilience
 
 import (
@@ -13,6 +28,9 @@ import (
 	"github.com/velosobr/passarim-bff/internal/usecase"
 )
 
+// BreakerConfig são os limites do breaker. Interval é de quanto em quanto
+// tempo os contadores do estado fechado são zerados, para falhas antigas não
+// se somarem às de agora.
 type BreakerConfig struct {
 	MaxRequests         uint32        // chamadas de teste no half-open
 	Interval            time.Duration // zera os contadores do estado fechado
@@ -22,12 +40,15 @@ type BreakerConfig struct {
 	FailureRatio        float64
 }
 
-// DefaultBreakerConfig são os valores da spec (§5.4). Ficam como constantes
-// comentadas, não como variáveis de ambiente.
+// DefaultBreakerConfig são os valores da spec (§5.4), fixos no código e não
+// em variáveis de ambiente.
 func DefaultBreakerConfig() BreakerConfig {
 	return BreakerConfig{MaxRequests: 3, Interval: 60 * time.Second, Timeout: 30 * time.Second, ConsecutiveFailures: 5, MinRequests: 10, FailureRatio: 0.6}
 }
 
+// breaker é o decorator: embrulha o próximo da cadeia e o disjuntor da
+// biblioteca. "[any]" diz que o disjuntor guarda resultados de qualquer
+// tipo; o guard converte de volta para o tipo certo.
 type breaker struct {
 	next usecase.CatalogReader
 	cb   *gobreaker.CircuitBreaker[any]
@@ -42,8 +63,8 @@ func NewBreaker(next usecase.CatalogReader, cfg BreakerConfig, log *slog.Logger,
 			return c.ConsecutiveFailures >= cfg.ConsecutiveFailures ||
 				(c.Requests >= cfg.MinRequests && float64(c.TotalFailures)/float64(c.Requests) >= cfg.FailureRatio)
 		},
-		// Só falha de INFRAESTRUTURA conta. NotFound, InvalidArgument, Canceled (cliente que
-		// desconectou) e Internal não são sinal de que o catalog esteja doente.
+		// Só falha de INFRAESTRUTURA conta como falha. NotFound, InvalidArgument,
+		// Canceled e Internal contam como sucesso: não são sinal de catalog doente.
 		IsSuccessful: func(err error) bool { return err == nil || !domain.KindOf(err).CountsForBreaker() },
 		OnStateChange: func(name string, from, to gobreaker.State) {
 			log.Info("circuit breaker mudou de estado", "breaker", name, "from", from.String(), "to", to.String())
@@ -53,6 +74,8 @@ func NewBreaker(next usecase.CatalogReader, cfg BreakerConfig, log *slog.Logger,
 	return &breaker{next: next, cb: cb}
 }
 
+// stateNumber converte o estado num número para a métrica: 0 fechado, 1
+// meio-aberto, 2 aberto.
 func stateNumber(s gobreaker.State) int {
 	switch s {
 	case gobreaker.StateHalfOpen:
@@ -64,6 +87,11 @@ func stateNumber(s gobreaker.State) int {
 }
 
 // guard roda fn dentro do breaker e traduz "aberto" para o Kind CircuitOpen.
+//
+// ErrTooManyRequests é a recusa do meio-aberto, quando as chamadas de teste
+// já estão ocupadas; para quem chama, é o mesmo que "aberto". v.(T) é uma
+// "type assertion": diz ao Go que o valor guardado como any é, na verdade,
+// um T.
 func guard[T any](b *breaker, fn func() (T, error)) (T, error) {
 	v, err := b.cb.Execute(func() (any, error) { return fn() })
 	if err != nil {
@@ -79,6 +107,7 @@ func guard[T any](b *breaker, fn func() (T, error)) (T, error) {
 	return v.(T), nil
 }
 
+// Os três métodos passam pela mesma proteção: um só breaker para o catalog.
 func (b *breaker) ListSpecies(ctx context.Context, q domain.ListQuery) (domain.SpeciesPage, error) {
 	return guard(b, func() (domain.SpeciesPage, error) { return b.next.ListSpecies(ctx, q) })
 }

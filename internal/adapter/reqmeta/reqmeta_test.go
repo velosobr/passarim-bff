@@ -1,3 +1,6 @@
+// Testes do registro da requisição: ida e volta pelo contexto, o
+// comportamento sem registro e a segurança com várias goroutines.
+
 package reqmeta_test
 
 import (
@@ -8,6 +11,8 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/reqmeta"
 )
 
+// O registro posto no contexto é o mesmo que se lê depois: o que uma camada
+// escreve, a outra enxerga.
 func TestMetaRoundTrip(t *testing.T) {
 	m := reqmeta.New("abc")
 	ctx := reqmeta.With(context.Background(), m)
@@ -20,6 +25,8 @@ func TestMetaRoundTrip(t *testing.T) {
 	}
 }
 
+// Sem registro no contexto, From devolve um descartável: escrever nele não
+// quebra, e o id vem vazio.
 func TestFromWithoutMetaIsSafe(t *testing.T) {
 	m := reqmeta.From(context.Background())
 	m.SetCache("hit") // não pode dar panic
@@ -28,6 +35,9 @@ func TestFromWithoutMetaIsSafe(t *testing.T) {
 	}
 }
 
+// 50 goroutines lendo e escrevendo ao mesmo tempo. Com "go test -race", o
+// detector de corridas do Go reprova o teste se a trava faltar.
+// WaitGroup espera todas terminarem antes de o teste acabar.
 func TestMetaIsConcurrencySafe(t *testing.T) {
 	m := reqmeta.New("x")
 	var wg sync.WaitGroup
