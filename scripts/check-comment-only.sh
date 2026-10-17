@@ -5,7 +5,7 @@
 #
 # Uso: bash scripts/check-comment-only.sh [base]   (base padrão: origin/main)
 # Sai com 0 quando está tudo certo; com 1 quando alguma linha alterada é código,
-# e imprime "arquivo: linha" de cada violação.
+# e imprime "arquivo: linha" de cada violação; com 2 quando a base não existe.
 #
 # A decisão é por linha do "git diff": cada linha adicionada (+) ou removida (-)
 # precisa ser vazia ou um comentário na sintaxe da linguagem do arquivo.
@@ -15,6 +15,14 @@
 set -euo pipefail
 
 base="${1:-origin/main}"
+
+# A base precisa existir. Sem esta checagem, um nome errado faria o "git diff"
+# lá embaixo falhar dentro do "< <(...)", que o set -e não enxerga: o laço
+# terminaria sem nenhum arquivo e o script diria "ok" sem ter comparado nada.
+if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+  echo "base não encontrada: $base (no CI, o checkout precisa de fetch-depth: 0)"
+  exit 2
+fi
 
 # Arquivos que podem mudar livremente numa branch de comentários: a configuração de lint que
 # os comentários exigirem, o próprio verificador, a CI que o chama e o README.
