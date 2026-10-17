@@ -72,6 +72,21 @@ caso "arquivo de código apagado"      d.go    $'package d' '' 1
 caso "arquivo liberado (README)"      README.md $'# x' $'# x\n\nTexto novo.' 0
 caso "extensão desconhecida"          x.json  $'{}' $'{"a":1}' 1
 
+# Base que não existe: o script tem que recusar (2) em vez de aprovar sem ter
+# comparado nada. Sem a checagem, o "git diff" falha dentro do "< <(...)", que
+# o set -e não enxerga, e o laço termina vazio dizendo "ok".
+dir="$(mktemp -d)"
+(cd "$dir" && git init -q -b main && git -c user.email=t@e.com -c user.name=t commit -q --allow-empty -m base)
+obtido=0
+(cd "$dir" && bash "$SCRIPT" origin/nao-existe >/dev/null 2>&1) || obtido=$?
+if [[ "$obtido" == 2 ]]; then
+  echo "ok    base inexistente"
+else
+  echo "FALHA base inexistente: esperado 2, obtido $obtido"
+  falhas=$((falhas + 1))
+fi
+rm -rf "$dir"
+
 if [[ "$falhas" -gt 0 ]]; then
   echo "$falhas caso(s) falharam"
   exit 1
