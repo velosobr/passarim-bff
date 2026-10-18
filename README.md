@@ -48,6 +48,10 @@ O código é todo comentado para estudo. Uma ordem que conta a história de uma 
 | `make swagger` | gera `docs/swagger.html` (Swagger UI) a partir do `openapi.yaml`; abra no navegador |
 | `make run` | roda o BFF local contra o catalog e o Redis do `docker compose` do `passarim-docs` |
 
+O ambiente inteiro (catalog, Redis, Traefik com as duas réplicas do BFF) sobe com `../passarim-docs/env.scripts/back-end-init`
+e cai com `back-end-down`; `back-end-status` diz se a API está pronta para testes. Depois de mudar o código do BFF, use
+`back-end-init --build` para reconstruir a imagem. Ver a seção "Operando o ambiente local" do README do `passarim-docs`.
+
 ## Contrato e design
 
 - Contrato REST: [`openapi.yaml`](openapi.yaml) (validado por teste de contrato com `kin-openapi`).
