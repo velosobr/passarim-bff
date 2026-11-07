@@ -102,7 +102,9 @@ func requestIDInterceptor(ctx context.Context, method string, req, reply any, cc
 
 // ListSpecies converte a consulta do domínio no pedido do proto, chama o
 // catalog e converte a resposta de volta. O bioma só é enviado quando há
-// filtro: o valor zero do enum (UNSPECIFIED) já quer dizer "sem filtro".
+// filtro: o valor zero do enum (UNSPECIFIED) já quer dizer "sem filtro". O
+// mesmo vale para o bioma principal; a audiência kids vira kids_only
+// (frente B).
 //
 // Os métodos Get* do código gerado (GetSpecies(), GetNextPageToken()) nunca
 // quebram com resposta nil: devolvem o valor zero. Por isso o código os usa
@@ -112,6 +114,10 @@ func (c *Client) ListSpecies(ctx context.Context, q domain.ListQuery) (domain.Sp
 	if q.Biome != "" {
 		req.Biome = biomeToProto[q.Biome]
 	}
+	if q.PrimaryBiome != "" {
+		req.PrimaryBiome = biomeToProto[q.PrimaryBiome]
+	}
+	req.KidsOnly = q.Audience == domain.AudienceKids
 	resp, err := c.rpc.ListSpecies(ctx, req)
 	if err != nil {
 		return domain.SpeciesPage{}, translateError(err)
@@ -137,11 +143,12 @@ func (c *Client) GetSpecies(ctx context.Context, id string) (domain.Species, err
 	return mapper{ctx: ctx, log: c.log}.species(resp.GetSpecies()), nil
 }
 
-// ListFilters busca as contagens por bioma e por UF. Valores que o BFF não
-// conhece (um bioma novo no proto, uma UF estranha) são descartados com um
-// aviso no log, para o app nunca receber um filtro que não sabe usar.
-func (c *Client) ListFilters(ctx context.Context) (domain.Filters, error) {
-	resp, err := c.rpc.ListFilters(ctx, &catalogv1.ListFiltersRequest{})
+// ListFilters busca as contagens por bioma, por UF e por bioma principal,
+// na audiência pedida. Valores que o BFF não conhece (um bioma novo no
+// proto, uma UF estranha) são descartados com um aviso no log, para o app
+// nunca receber um filtro que não sabe usar.
+func (c *Client) ListFilters(ctx context.Context, q domain.FiltersQuery) (domain.Filters, error) {
+	resp, err := c.rpc.ListFilters(ctx, &catalogv1.ListFiltersRequest{KidsOnly: q.Audience == domain.AudienceKids})
 	if err != nil {
 		return domain.Filters{}, translateError(err)
 	}
@@ -157,5 +164,24 @@ func (c *Client) ListFilters(ctx context.Context) (domain.Filters, error) {
 			f.States = append(f.States, domain.StateCount{State: uf, SpeciesCount: int(s.GetSpeciesCount())})
 		}
 	}
+	for _, b := range resp.GetPrimaryBiomeCounts() {
+		if d, ok := m.biome(b.GetBiome()); ok {
+			f.PrimaryBiomes = append(f.PrimaryBiomes, domain.BiomeCount{Biome: d, SpeciesCount: int(b.GetSpeciesCount())})
+		}
+	}
 	return f, nil
+}
+
+// GetFeatured busca a "Ave do dia" da data. Como no detalhe, uma resposta
+// sem espécie (o que o contrato não prevê) vira KindInternal.
+func (c *Client) GetFeatured(ctx context.Context, date string) (domain.Featured, error) {
+	resp, err := c.rpc.GetFeaturedSpecies(ctx, &catalogv1.GetFeaturedSpeciesRequest{Date: date})
+	if err != nil {
+		return domain.Featured{}, translateError(err)
+	}
+	if resp.GetSpecies() == nil {
+		return domain.Featured{}, domain.NewError(domain.KindInternal, nil) // resposta inesperada
+	}
+	m := mapper{ctx: ctx, log: c.log}
+	return domain.Featured{Species: m.summary(resp.GetSpecies()), Audio: audio(resp.GetAudio())}, nil
 }

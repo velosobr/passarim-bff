@@ -80,6 +80,17 @@ func (m mapper) biome(b catalogv1.Biome) (domain.Biome, bool) {
 	return d, ok
 }
 
+// primaryBiome converte o bioma principal (frente B). UNSPECIFIED quer dizer
+// "sem bioma principal" e vira "" sem aviso; só um valor desconhecido de
+// verdade é registrado no log.
+func (m mapper) primaryBiome(b catalogv1.Biome) domain.Biome {
+	if b == catalogv1.Biome_BIOME_UNSPECIFIED {
+		return ""
+	}
+	d, _ := m.biome(b)
+	return d
+}
+
 // uf normaliza e valida uma sigla de UF vinda do catalog.
 func (m mapper) uf(s string) (string, bool) {
 	uf, ok := domain.NormalizeUF(s)
@@ -92,7 +103,31 @@ func (m mapper) uf(s string) (string, bool) {
 // summary converte o resumo de uma espécie (o card da lista).
 func (m mapper) summary(s *catalogv1.SpeciesSummary) domain.Summary {
 	return domain.Summary{ID: s.GetId(), ScientificName: s.GetScientificName(), CommonName: s.GetCommonNamePt(),
-		ThumbnailKey: s.GetThumbnailKey(), Conservation: conservation(s.GetConservationStatus())}
+		ThumbnailKey: s.GetThumbnailKey(), Conservation: conservation(s.GetConservationStatus()),
+		PrimaryBiome: m.primaryBiome(s.GetPrimaryBiome())}
+}
+
+// audio converte o canto. Ausente ou sem chave = sem canto (nil). Os picos
+// são copiados para uma lista nova, como os ponteiros da espécie.
+func audio(a *catalogv1.Audio) *domain.Audio {
+	if a.GetKey() == "" {
+		return nil
+	}
+	return &domain.Audio{Key: a.GetKey(), DurationMs: int(a.GetDurationMs()), Credit: credit(a.GetCredit()),
+		Peaks: append([]float32(nil), a.GetPeaks()...)}
+}
+
+// kids converte o conteúdo Kids. nil (a espécie ainda não tem) continua nil:
+// é pela ausência que o app sabe que a ave não entra no Kids.
+func kids(k *catalogv1.KidsContent) *domain.KidsContent {
+	if k == nil {
+		return nil
+	}
+	out := &domain.KidsContent{Description: k.GetDescription(), DidYouKnow: k.GetDidYouKnow()}
+	for _, f := range k.GetFacts() {
+		out.Facts = append(out.Facts, f.GetText())
+	}
+	return out
 }
 
 // species converte a espécie completa. Os campos "optional" do proto chegam
@@ -103,6 +138,7 @@ func (m mapper) species(s *catalogv1.Species) domain.Species {
 		ID: s.GetId(), ScientificName: s.GetScientificName(), CommonName: s.GetCommonNamePt(), Family: s.GetFamily(),
 		Conservation: conservation(s.GetConservationStatus()), Description: s.GetDescription(),
 		DescriptionCredit: credit(s.GetDescriptionCredit()),
+		PrimaryBiome:      m.primaryBiome(s.GetPrimaryBiome()), Kids: kids(s.GetKids()), Audio: audio(s.GetAudio()),
 	}
 	if s.SizeCm != nil {
 		v := int(*s.SizeCm)
@@ -128,9 +164,6 @@ func (m mapper) species(s *catalogv1.Species) domain.Species {
 	for _, p := range s.GetPhotos() {
 		out.Photos = append(out.Photos, domain.Photo{ThumbKey: p.GetThumbKey(), MediumKey: p.GetMediumKey(), LargeKey: p.GetLargeKey(),
 			Width: int(p.GetWidth()), Height: int(p.GetHeight()), Credit: credit(p.GetCredit())})
-	}
-	if a := s.GetAudio(); a != nil && a.GetKey() != "" { // áudio sem chave = sem áudio
-		out.Audio = &domain.Audio{Key: a.GetKey(), DurationMs: int(a.GetDurationMs()), Credit: credit(a.GetCredit())}
 	}
 	for _, c := range s.GetClusters() {
 		out.Clusters = append(out.Clusters, domain.Cluster{Lat: c.GetLat(), Lng: c.GetLng(), Count: int(c.GetCount()), Precision: c.GetPrecision()})
@@ -162,7 +195,9 @@ func translateError(err error) error {
 		kind = domain.KindInvalidArgument
 	case codes.Canceled:
 		kind = domain.KindCanceled
-	default: // Unimplemented, PermissionDenied, FailedPrecondition...: erro de versão/config, não queda
+	case codes.Unimplemented: // catalog numa versão sem o método (um deploy desfeito)
+		kind = domain.KindUnimplemented
+	default: // PermissionDenied, FailedPrecondition...: erro de configuração, não queda
 		kind = domain.KindInternal
 	}
 	return domain.NewError(kind, err)

@@ -32,15 +32,16 @@ import (
 //
 // Embutir catalogv1.UnimplementedCatalogServiceServer (o campo sem nome) dá à
 // struct todos os métodos do serviço, que respondem "não implementado"; o
-// fake só sobrescreve os três que usa. calls é atômico porque o servidor gRPC
+// fake só sobrescreve os quatro que usa. calls é atômico porque o servidor gRPC
 // atende em outra goroutine, e lastMD guarda os metadados recebidos.
 type fakeServer struct {
 	catalogv1.UnimplementedCatalogServiceServer
-	list    func(*catalogv1.ListSpeciesRequest) (*catalogv1.ListSpeciesResponse, error)
-	get     func(*catalogv1.GetSpeciesRequest) (*catalogv1.GetSpeciesResponse, error)
-	filters func() (*catalogv1.ListFiltersResponse, error)
-	calls   atomic.Int32
-	lastMD  metadata.MD
+	list     func(*catalogv1.ListSpeciesRequest) (*catalogv1.ListSpeciesResponse, error)
+	get      func(*catalogv1.GetSpeciesRequest) (*catalogv1.GetSpeciesResponse, error)
+	filters  func(*catalogv1.ListFiltersRequest) (*catalogv1.ListFiltersResponse, error)
+	featured func(*catalogv1.GetFeaturedSpeciesRequest) (*catalogv1.GetFeaturedSpeciesResponse, error)
+	calls    atomic.Int32
+	lastMD   metadata.MD
 }
 
 // Cada método conta a chamada, guarda os metadados (quando o teste precisa)
@@ -57,9 +58,14 @@ func (f *fakeServer) GetSpecies(ctx context.Context, r *catalogv1.GetSpeciesRequ
 	return f.get(r)
 }
 
-func (f *fakeServer) ListFilters(ctx context.Context, _ *catalogv1.ListFiltersRequest) (*catalogv1.ListFiltersResponse, error) {
+func (f *fakeServer) ListFilters(ctx context.Context, r *catalogv1.ListFiltersRequest) (*catalogv1.ListFiltersResponse, error) {
 	f.calls.Add(1)
-	return f.filters()
+	return f.filters(r)
+}
+
+func (f *fakeServer) GetFeaturedSpecies(ctx context.Context, r *catalogv1.GetFeaturedSpeciesRequest) (*catalogv1.GetFeaturedSpeciesResponse, error) {
+	f.calls.Add(1)
+	return f.featured(r)
 }
 
 // start sobe o servidor em memória (bufconn: sem rede de verdade) e devolve o cliente do BFF.
@@ -173,15 +179,101 @@ func TestListSpecies_TranslatesRequestAndResponse(t *testing.T) {
 
 // Nos filtros, o bioma UNSPECIFIED e a UF "ZZ" são descartados.
 func TestListFilters_DropsUnknownBiomeAndState(t *testing.T) {
-	srv := &fakeServer{filters: func() (*catalogv1.ListFiltersResponse, error) {
+	srv := &fakeServer{filters: func(*catalogv1.ListFiltersRequest) (*catalogv1.ListFiltersResponse, error) {
 		return &catalogv1.ListFiltersResponse{
 			Biomes: []*catalogv1.BiomeCount{{Biome: catalogv1.Biome_BIOME_PAMPA, SpeciesCount: 3}, {Biome: catalogv1.Biome_BIOME_UNSPECIFIED, SpeciesCount: 9}},
 			States: []*catalogv1.StateCount{{State: "RS", SpeciesCount: 5}, {State: "ZZ", SpeciesCount: 1}},
 		}, nil
 	}}
-	f, err := start(t, srv).ListFilters(context.Background())
+	f, err := start(t, srv).ListFilters(context.Background(), domain.FiltersQuery{Audience: domain.AudienceAdult})
 	if err != nil || len(f.Biomes) != 1 || f.Biomes[0].Biome != domain.BiomePampa || f.Biomes[0].SpeciesCount != 3 || len(f.States) != 1 || f.States[0].State != "RS" {
 		t.Fatalf("got %+v %v", f, err)
+	}
+}
+
+// O detalhe traz o bioma principal, o conteúdo Kids (só o texto dos fatos)
+// e os picos do canto (frente B).
+func TestGetSpecies_KidsPrimaryBiomeAndPeaks(t *testing.T) {
+	srv := &fakeServer{get: func(*catalogv1.GetSpeciesRequest) (*catalogv1.GetSpeciesResponse, error) {
+		return &catalogv1.GetSpeciesResponse{Species: &catalogv1.Species{Id: "t", PrimaryBiome: catalogv1.Biome_BIOME_PAMPA,
+			Kids:  &catalogv1.KidsContent{Description: "D", DidYouKnow: "V", Facts: []*catalogv1.KidsFact{{Text: "F", SourceFact: 1}}},
+			Audio: &catalogv1.Audio{Key: "a.aac", DurationMs: 3000, Peaks: []float32{0, 0.5, 1}}}}, nil
+	}}
+	s, err := start(t, srv).GetSpecies(context.Background(), "t")
+	if err != nil || s.PrimaryBiome != domain.BiomePampa || s.Kids == nil || s.Kids.Description != "D" || s.Kids.DidYouKnow != "V" ||
+		len(s.Kids.Facts) != 1 || s.Kids.Facts[0] != "F" || s.Audio == nil || len(s.Audio.Peaks) != 3 || s.Audio.Peaks[2] != 1 {
+		t.Fatalf("got %+v kids=%+v audio=%+v %v", s, s.Kids, s.Audio, err)
+	}
+}
+
+// Sem bloco Kids e com o bioma principal UNSPECIFIED, os campos ficam
+// vazios (nil e ""), sem aviso no log: é o caso normal de uma ave nova.
+func TestGetSpecies_NoKidsAndUnspecifiedPrimaryBiome(t *testing.T) {
+	srv := &fakeServer{get: func(*catalogv1.GetSpeciesRequest) (*catalogv1.GetSpeciesResponse, error) {
+		return &catalogv1.GetSpeciesResponse{Species: &catalogv1.Species{Id: "t"}}, nil
+	}}
+	s, err := start(t, srv).GetSpecies(context.Background(), "t")
+	if err != nil || s.Kids != nil || s.PrimaryBiome != "" || s.Audio != nil {
+		t.Fatalf("got %+v %v", s, err)
+	}
+}
+
+// A audiência kids vira kids_only, e o bioma principal vai no pedido; o
+// resumo volta com o bioma principal.
+func TestListSpecies_KidsFilters(t *testing.T) {
+	var got *catalogv1.ListSpeciesRequest
+	srv := &fakeServer{list: func(r *catalogv1.ListSpeciesRequest) (*catalogv1.ListSpeciesResponse, error) {
+		got = r
+		return &catalogv1.ListSpeciesResponse{Species: []*catalogv1.SpeciesSummary{{Id: "a", PrimaryBiome: catalogv1.Biome_BIOME_PAMPA}}}, nil
+	}}
+	page, err := start(t, srv).ListSpecies(context.Background(), domain.ListQuery{Limit: 20, Audience: domain.AudienceKids, PrimaryBiome: domain.BiomePampa})
+	if err != nil || !got.GetKidsOnly() || got.GetPrimaryBiome() != catalogv1.Biome_BIOME_PAMPA || page.Items[0].PrimaryBiome != domain.BiomePampa {
+		t.Fatalf("pedido=%v página=%+v %v", got, page, err)
+	}
+	if _, err := start(t, srv).ListSpecies(context.Background(), domain.ListQuery{Limit: 20, Audience: domain.AudienceAdult}); err != nil || got.GetKidsOnly() || got.GetPrimaryBiome() != catalogv1.Biome_BIOME_UNSPECIFIED {
+		t.Fatalf("adulto não manda kids_only nem bioma principal: %v %v", got, err)
+	}
+}
+
+// Os filtros da audiência kids mandam kids_only e trazem as contagens por
+// bioma principal.
+func TestListFilters_KidsAndPrimaryBiomes(t *testing.T) {
+	var got *catalogv1.ListFiltersRequest
+	srv := &fakeServer{filters: func(r *catalogv1.ListFiltersRequest) (*catalogv1.ListFiltersResponse, error) {
+		got = r
+		return &catalogv1.ListFiltersResponse{PrimaryBiomeCounts: []*catalogv1.BiomeCount{{Biome: catalogv1.Biome_BIOME_CERRADO, SpeciesCount: 4}}}, nil
+	}}
+	f, err := start(t, srv).ListFilters(context.Background(), domain.FiltersQuery{Audience: domain.AudienceKids})
+	if err != nil || !got.GetKidsOnly() || len(f.PrimaryBiomes) != 1 || f.PrimaryBiomes[0].Biome != domain.BiomeCerrado || f.PrimaryBiomes[0].SpeciesCount != 4 {
+		t.Fatalf("pedido=%v filtros=%+v %v", got, f, err)
+	}
+}
+
+// A "Ave do dia": a data vai no pedido, e o resumo e o canto voltam. Sem
+// canto, Audio fica nil; sem espécie na resposta, é KindInternal.
+func TestGetFeatured(t *testing.T) {
+	var got string
+	srv := &fakeServer{featured: func(r *catalogv1.GetFeaturedSpeciesRequest) (*catalogv1.GetFeaturedSpeciesResponse, error) {
+		got = r.GetDate()
+		return &catalogv1.GetFeaturedSpeciesResponse{Species: &catalogv1.SpeciesSummary{Id: "t", ThumbnailKey: "k"},
+			Audio: &catalogv1.Audio{Key: "a.aac", Peaks: []float32{1}}}, nil
+	}}
+	c := start(t, srv)
+	f, err := c.GetFeatured(context.Background(), "2026-11-05")
+	if err != nil || got != "2026-11-05" || f.Species.ID != "t" || f.Audio == nil || f.Audio.Peaks[0] != 1 {
+		t.Fatalf("got %+v %v", f, err)
+	}
+	srv.featured = func(*catalogv1.GetFeaturedSpeciesRequest) (*catalogv1.GetFeaturedSpeciesResponse, error) {
+		return &catalogv1.GetFeaturedSpeciesResponse{Species: &catalogv1.SpeciesSummary{Id: "t"}}, nil
+	}
+	if f, err := c.GetFeatured(context.Background(), "2026-11-05"); err != nil || f.Audio != nil {
+		t.Fatalf("sem canto: %+v %v", f, err)
+	}
+	srv.featured = func(*catalogv1.GetFeaturedSpeciesRequest) (*catalogv1.GetFeaturedSpeciesResponse, error) {
+		return &catalogv1.GetFeaturedSpeciesResponse{}, nil
+	}
+	if _, err := c.GetFeatured(context.Background(), "2026-11-05"); domain.KindOf(err) != domain.KindInternal {
+		t.Fatalf("sem espécie deveria ser KindInternal, veio %v", err)
 	}
 }
 
@@ -193,7 +285,7 @@ func TestErrorCodesMapToKinds(t *testing.T) {
 		codes.Unavailable: domain.KindUnavailable, codes.DeadlineExceeded: domain.KindTimeout,
 		codes.Internal: domain.KindUpstream, codes.Unknown: domain.KindUpstream, codes.ResourceExhausted: domain.KindUpstream,
 		codes.NotFound: domain.KindNotFound, codes.InvalidArgument: domain.KindInvalidArgument, codes.Canceled: domain.KindCanceled,
-		codes.Unimplemented: domain.KindInternal, codes.PermissionDenied: domain.KindInternal, codes.FailedPrecondition: domain.KindInternal,
+		codes.Unimplemented: domain.KindUnimplemented, codes.PermissionDenied: domain.KindInternal, codes.FailedPrecondition: domain.KindInternal,
 	}
 	for code, want := range cases {
 		srv := &fakeServer{get: func(*catalogv1.GetSpeciesRequest) (*catalogv1.GetSpeciesResponse, error) {
