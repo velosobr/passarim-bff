@@ -74,7 +74,7 @@ type envelope[D any] struct {
 // os que estão esperando. O erro vai dentro do resultado, e não como erro do
 // singleflight, para cada chamador decidir sozinho se serve o dado velho.
 //
-// T é o tipo do domínio: uma espécie, uma página ou os filtros.
+// T é o tipo do domínio: uma espécie, uma página, os filtros ou a ave do dia.
 type flightResult[T any] struct {
 	value T
 	err   error

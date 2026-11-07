@@ -19,7 +19,7 @@ type Kind int
 // zero é KindInternal de propósito: um erro sem classificação é tratado como
 // bug, o caso mais seguro.
 const (
-	KindInternal        Kind = iota // bug, resposta inesperada, Unimplemented...
+	KindInternal        Kind = iota // bug, resposta inesperada, PermissionDenied...
 	KindUnavailable                 // gRPC Unavailable
 	KindTimeout                     // gRPC DeadlineExceeded (ou nosso timeout)
 	KindUpstream                    // gRPC Internal/Unknown/ResourceExhausted (ex.: Postgres caiu)
