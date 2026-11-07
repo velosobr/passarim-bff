@@ -7,6 +7,7 @@ import (
 
 	"github.com/velosobr/passarim-bff/internal/adapter/media"
 	"github.com/velosobr/passarim-bff/internal/domain"
+	"github.com/velosobr/passarim-bff/internal/usecase"
 )
 
 // DTOs = o contrato REST. São structs PRÓPRIAS: nunca serializamos o domínio
@@ -32,13 +33,15 @@ type creditDTO struct {
 	SourceURL string `json:"sourceUrl"`
 }
 
-// summaryDTO é o card da lista. thumbnailUrl é null quando ainda não há foto.
+// summaryDTO é o card da lista. thumbnailUrl é null quando ainda não há foto,
+// e primaryBiome (o "mundo" da ave no Kids) é null quando a ave não tem.
 type summaryDTO struct {
 	ID                 string    `json:"id"`
 	CommonName         string    `json:"commonName"`
 	ScientificName     string    `json:"scientificName"`
 	ThumbnailURL       *string   `json:"thumbnailUrl"`
 	ConservationStatus *labelDTO `json:"conservationStatus"`
+	PrimaryBiome       *string   `json:"primaryBiome"`
 }
 
 // speciesPageDTO é uma página; nextCursor é null na última.
@@ -63,11 +66,27 @@ type photoDTO struct {
 	Credit    creditDTO `json:"credit"`
 }
 
-// audioDTO é o canto, já com a URL pública.
+// audioDTO é o canto, já com a URL pública. peaks são os 64 picos da forma
+// de onda, de 0 a 1; sai [] (nunca null) quando o catalog ainda não os
+// calculou, e o app desenha uma forma genérica.
 type audioDTO struct {
 	URL        string    `json:"url"`
 	DurationMs int       `json:"durationMs"`
 	Credit     creditDTO `json:"credit"`
+	Peaks      []float32 `json:"peaks"`
+}
+
+// kidsFactDTO é um fato do conteúdo Kids, só com o texto.
+type kidsFactDTO struct {
+	Text string `json:"text"`
+}
+
+// kidsDTO é o conteúdo para crianças (frente B). Não tem nenhuma URL: nenhum
+// link chega à jornada Kids.
+type kidsDTO struct {
+	Description string        `json:"description"`
+	Facts       []kidsFactDTO `json:"facts"`
+	DidYouKnow  string        `json:"didYouKnow"`
 }
 
 // clusterDTO é um grupo de avistamentos do mapa.
@@ -102,6 +121,8 @@ type speciesDTO struct {
 	Photos             []photoDTO     `json:"photos"`
 	Audio              *audioDTO      `json:"audio"`
 	WhereToFind        whereToFindDTO `json:"whereToFind"`
+	PrimaryBiome       *string        `json:"primaryBiome"`
+	Kids               *kidsDTO       `json:"kids"` // null = a ave não entra no Kids
 }
 
 // biomeCountDTO e stateCountDTO são as opções de filtro com as contagens.
@@ -116,10 +137,20 @@ type stateCountDTO struct {
 	SpeciesCount int    `json:"speciesCount"`
 }
 
-// filtersDTO é a resposta de /v1/filters.
+// filtersDTO é a resposta de /v1/filters. primaryBiomes conta por bioma
+// principal, no mesmo formato de biomes: é a conta do álbum do Kids.
 type filtersDTO struct {
-	Biomes []biomeCountDTO `json:"biomes"`
-	States []stateCountDTO `json:"states"`
+	Biomes        []biomeCountDTO `json:"biomes"`
+	States        []stateCountDTO `json:"states"`
+	PrimaryBiomes []biomeCountDTO `json:"primaryBiomes"`
+}
+
+// featuredDTO é a resposta de /v1/featured: a data (AAAA-MM-DD, fuso de São
+// Paulo), o card da ave e o canto (null se a ave não tiver).
+type featuredDTO struct {
+	Date    string     `json:"date"`
+	Species summaryDTO `json:"species"`
+	Audio   *audioDTO  `json:"audio"`
 }
 
 // conservationDTO devolve o código com o rótulo, ou nil para status
@@ -137,12 +168,41 @@ func toCredit(c domain.Credit) creditDTO {
 	return creditDTO{Author: c.Author, License: c.License, Source: c.Source, SourceURL: c.SourceURL}
 }
 
+// biomeCode devolve o código do bioma, ou nil para "" (sem bioma): no JSON,
+// null, nunca uma string vazia nem "unspecified".
+func biomeCode(b domain.Biome) *string {
+	if b == "" {
+		return nil
+	}
+	s := string(b)
+	return &s
+}
+
+// toSummaryDTO monta o card de uma ave, já com a URL da miniatura.
+func toSummaryDTO(ctx context.Context, s domain.Summary, m *media.Builder) summaryDTO {
+	return summaryDTO{ID: s.ID, CommonName: s.CommonName, ScientificName: s.ScientificName,
+		ThumbnailURL: m.URL(ctx, s.ThumbnailKey), ConservationStatus: conservationDTO(s.Conservation), PrimaryBiome: biomeCode(s.PrimaryBiome)}
+}
+
+// toAudioDTO monta o canto. Sem canto, ou com uma chave que não vira URL
+// segura, devolve nil: o app esconde o player, em vez de receber uma URL
+// montada a partir de uma chave vazia.
+func toAudioDTO(ctx context.Context, a *domain.Audio, m *media.Builder) *audioDTO {
+	if a == nil {
+		return nil
+	}
+	u := m.URL(ctx, a.Key)
+	if u == nil {
+		return nil
+	}
+	return &audioDTO{URL: *u, DurationMs: a.DurationMs, Credit: toCredit(a.Credit), Peaks: append(make([]float32, 0, len(a.Peaks)), a.Peaks...)}
+}
+
 // toPageDTO monta a página, já trocando as chaves de mídia por URLs.
 func toPageDTO(ctx context.Context, p domain.SpeciesPage, m *media.Builder) speciesPageDTO {
 	out := speciesPageDTO{Items: make([]summaryDTO, 0, len(p.Items))}
 	for _, s := range p.Items {
-		out.Items = append(out.Items, summaryDTO{ID: s.ID, CommonName: s.CommonName, ScientificName: s.ScientificName,
-			ThumbnailURL: m.URL(ctx, s.ThumbnailKey), ConservationStatus: conservationDTO(s.Conservation)})
+		out.Items = append(out.Items, toSummaryDTO(ctx, s, m))
 	}
 	if p.NextCursor != "" {
 		out.NextCursor = &p.NextCursor
@@ -158,6 +218,7 @@ func toSpeciesDTO(ctx context.Context, s domain.Species, m *media.Builder) speci
 		ID: s.ID, CommonName: s.CommonName, ScientificName: s.ScientificName, Family: s.Family,
 		ConservationStatus: conservationDTO(s.Conservation), SizeCm: s.SizeCm, Diet: s.Diet,
 		Description: s.Description, DescriptionCredit: toCredit(s.DescriptionCredit),
+		Audio: toAudioDTO(ctx, s.Audio, m), PrimaryBiome: biomeCode(s.PrimaryBiome),
 		Facts: make([]factDTO, 0, len(s.Facts)), Chips: make([]labelDTO, 0, len(s.Biomes)), Photos: make([]photoDTO, 0, len(s.Photos)),
 		WhereToFind: whereToFindDTO{States: make([]string, 0, len(s.States)), Biomes: make([]string, 0, len(s.Biomes)), Clusters: make([]clusterDTO, 0, len(s.Clusters))},
 	}
@@ -173,10 +234,10 @@ func toSpeciesDTO(ctx context.Context, s domain.Species, m *media.Builder) speci
 		out.Photos = append(out.Photos, photoDTO{ThumbURL: m.URL(ctx, p.ThumbKey), MediumURL: m.URL(ctx, p.MediumKey), LargeURL: m.URL(ctx, p.LargeKey),
 			Width: p.Width, Height: p.Height, Credit: toCredit(p.Credit)})
 	}
-	if s.Audio != nil {
-		// Áudio com URL insegura/vazia = sem áudio: o app esconde o player.
-		if u := m.URL(ctx, s.Audio.Key); u != nil {
-			out.Audio = &audioDTO{URL: *u, DurationMs: s.Audio.DurationMs, Credit: toCredit(s.Audio.Credit)}
+	if k := s.Kids; k != nil {
+		out.Kids = &kidsDTO{Description: k.Description, DidYouKnow: k.DidYouKnow, Facts: make([]kidsFactDTO, 0, len(k.Facts))}
+		for _, f := range k.Facts {
+			out.Kids.Facts = append(out.Kids.Facts, kidsFactDTO{Text: f})
 		}
 	}
 	for _, c := range s.Clusters {
@@ -187,12 +248,24 @@ func toSpeciesDTO(ctx context.Context, s domain.Species, m *media.Builder) speci
 
 // toFiltersDTO monta os filtros, com o rótulo de cada bioma.
 func toFiltersDTO(f domain.Filters) filtersDTO {
-	out := filtersDTO{Biomes: make([]biomeCountDTO, 0, len(f.Biomes)), States: make([]stateCountDTO, 0, len(f.States))}
-	for _, b := range f.Biomes {
-		out.Biomes = append(out.Biomes, biomeCountDTO{Code: string(b.Biome), Label: biomeLabels[b.Biome], SpeciesCount: b.SpeciesCount})
-	}
+	out := filtersDTO{Biomes: toBiomeCounts(f.Biomes), States: make([]stateCountDTO, 0, len(f.States)), PrimaryBiomes: toBiomeCounts(f.PrimaryBiomes)}
 	for _, s := range f.States {
 		out.States = append(out.States, stateCountDTO{Code: s.State, SpeciesCount: s.SpeciesCount})
 	}
 	return out
+}
+
+// toBiomeCounts monta as contagens por bioma com o rótulo; sempre uma lista
+// ([] e não null).
+func toBiomeCounts(counts []domain.BiomeCount) []biomeCountDTO {
+	out := make([]biomeCountDTO, 0, len(counts))
+	for _, b := range counts {
+		out = append(out, biomeCountDTO{Code: string(b.Biome), Label: biomeLabels[b.Biome], SpeciesCount: b.SpeciesCount})
+	}
+	return out
+}
+
+// toFeaturedDTO monta a resposta da "Ave do dia".
+func toFeaturedDTO(ctx context.Context, out usecase.FeaturedOutput, m *media.Builder) featuredDTO {
+	return featuredDTO{Date: out.Date, Species: toSummaryDTO(ctx, out.Featured.Species, m), Audio: toAudioDTO(ctx, out.Featured.Audio, m)}
 }

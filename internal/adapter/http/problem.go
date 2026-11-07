@@ -17,6 +17,7 @@ import (
 const (
 	CodeInvalidParameter   = "INVALID_PARAMETER"
 	CodeSpeciesNotFound    = "SPECIES_NOT_FOUND"
+	CodeFeaturedNotFound   = "FEATURED_NOT_FOUND"
 	CodeNotFound           = "NOT_FOUND"
 	CodeMethodNotAllowed   = "METHOD_NOT_ALLOWED"
 	CodeRateLimited        = "RATE_LIMITED"
@@ -28,6 +29,7 @@ const (
 var problemTitles = map[string]string{
 	CodeInvalidParameter:   "Parâmetro inválido",
 	CodeSpeciesNotFound:    "Espécie não encontrada",
+	CodeFeaturedNotFound:   "Nenhuma ave do dia",
 	CodeNotFound:           "Recurso não encontrado",
 	CodeMethodNotAllowed:   "Método não permitido",
 	CodeRateLimited:        "Muitas requisições",

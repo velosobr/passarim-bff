@@ -10,7 +10,7 @@
 openapi: 3.0.3
 info:
   title: Passarim BFF
-  version: 1.0.0
+  version: 1.1.0
   description: |
     API REST do Passarim (catálogo de aves do Brasil). Somente leitura.
     Erros seguem o RFC 9457 (`application/problem+json`) com um `code` estável.
@@ -36,6 +36,8 @@ paths:
         - $ref: '#/components/parameters/State'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Audience'
+        - $ref: '#/components/parameters/PrimaryBiome'
       responses:
         '200':
           description: Página de espécies
@@ -84,7 +86,9 @@ paths:
     get:
       tags: [catalog]
       operationId: listFilters
-      summary: Biomas e estados com contagem de espécies
+      summary: Biomas, estados e biomas principais com contagem de espécies
+      parameters:
+        - $ref: '#/components/parameters/Audience'
       responses:
         '200':
           description: Filtros disponíveis (os `code` valem como `biome` e `state` na lista)
@@ -95,7 +99,35 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Filters' }
+        '400': { $ref: '#/components/responses/InvalidParameter' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/Internal' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  # Usada pelo card "Ave do dia" das duas jornadas (frente B). A ave troca à
+  # meia-noite de São Paulo, e o max-age vai só até essa meia-noite.
+  /v1/featured:
+    get:
+      tags: [catalog]
+      operationId: getFeatured
+      summary: A "Ave do dia"
+      description: |
+        A mesma ave o dia todo, para todos, em rodízio sem repetição. A data
+        é a de hoje no fuso de São Paulo, calculada pelo servidor. O
+        `Cache-Control` traz `max-age` com os segundos até a próxima
+        meia-noite de São Paulo (no mínimo 1).
+      responses:
+        '200':
+          description: A ave do dia
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/XRequestId' }
+            X-Cache: { $ref: '#/components/headers/XCache' }
+            Cache-Control: { $ref: '#/components/headers/CacheControl' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Featured' }
+        '404': { $ref: '#/components/responses/FeaturedNotFound' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/Internal' }
@@ -154,6 +186,16 @@ components:
       name: limit
       in: query
       schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+    Audience:
+      name: audience
+      in: query
+      description: Jornada. `kids` traz só as aves com conteúdo Kids.
+      schema: { type: string, enum: [adult, kids], default: adult }
+    PrimaryBiome:
+      name: primaryBiome
+      in: query
+      description: Bioma principal, o "mundo" da ave no Kids (diferente de `biome`, que vale para qualquer bioma da ave).
+      schema: { $ref: '#/components/schemas/BiomeCode' }
   # Cabeçalhos que as respostas trazem.
   headers:
     XRequestId:
@@ -175,6 +217,11 @@ components:
           schema: { $ref: '#/components/schemas/Problem' }
     SpeciesNotFound:
       description: Espécie inexistente (`SPECIES_NOT_FOUND`)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    FeaturedNotFound:
+      description: Nenhuma ave elegível para a "Ave do dia" (`FEATURED_NOT_FOUND`); o app esconde o card
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -240,7 +287,7 @@ components:
         sourceUrl: { type: string }
     SpeciesSummary:
       type: object
-      required: [id, commonName, scientificName, thumbnailUrl, conservationStatus]
+      required: [id, commonName, scientificName, thumbnailUrl, conservationStatus, primaryBiome]
       properties:
         id: { type: string }
         commonName: { type: string }
@@ -250,6 +297,7 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/ConservationStatus'
+        primaryBiome: { $ref: '#/components/schemas/PrimaryBiome' }
     SpeciesPage:
       type: object
       required: [items, nextCursor]
@@ -274,13 +322,38 @@ components:
         width: { type: integer }
         height: { type: integer }
         credit: { $ref: '#/components/schemas/Credit' }
+    PrimaryBiome:
+      type: string
+      nullable: true
+      description: O "mundo" da ave no Kids; null quando a ave ainda não tem.
+      enum: [amazonia, mata_atlantica, cerrado, caatinga, pantanal, pampa, null]
     Audio:
       type: object
-      required: [url, durationMs, credit]
+      required: [url, durationMs, credit, peaks]
       properties:
         url: { type: string }
         durationMs: { type: integer }
         credit: { $ref: '#/components/schemas/Credit' }
+        peaks:
+          type: array
+          description: Os 64 picos da forma de onda, de 0 a 1; vazio quando ainda não foram calculados.
+          maxItems: 64
+          items: { type: number, minimum: 0, maximum: 1 }
+    KidsFact:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+    Kids:
+      type: object
+      description: Conteúdo para crianças, sem nenhum link.
+      required: [description, facts, didYouKnow]
+      properties:
+        description: { type: string }
+        facts:
+          type: array
+          items: { $ref: '#/components/schemas/KidsFact' }
+        didYouKnow: { type: string }
     Cluster:
       type: object
       required: [lat, lng, count, precision]
@@ -304,7 +377,7 @@ components:
           items: { $ref: '#/components/schemas/Cluster' }
     Species:
       type: object
-      required: [id, commonName, scientificName, family, conservationStatus, sizeCm, diet, description, descriptionCredit, facts, chips, photos, audio, whereToFind]
+      required: [id, commonName, scientificName, family, conservationStatus, sizeCm, diet, description, descriptionCredit, facts, chips, photos, audio, whereToFind, primaryBiome, kids]
       properties:
         id: { type: string }
         commonName: { type: string }
@@ -334,6 +407,12 @@ components:
           allOf:
             - $ref: '#/components/schemas/Audio'
         whereToFind: { $ref: '#/components/schemas/WhereToFind' }
+        primaryBiome: { $ref: '#/components/schemas/PrimaryBiome' }
+        kids:
+          nullable: true
+          description: null quando a ave ainda não tem conteúdo Kids (e não aparece na jornada Kids).
+          allOf:
+            - $ref: '#/components/schemas/Kids'
     BiomeCount:
       type: object
       required: [code, label, speciesCount]
@@ -349,7 +428,7 @@ components:
         speciesCount: { type: integer }
     Filters:
       type: object
-      required: [biomes, states]
+      required: [biomes, states, primaryBiomes]
       properties:
         biomes:
           type: array
@@ -357,6 +436,20 @@ components:
         states:
           type: array
           items: { $ref: '#/components/schemas/StateCount' }
+        primaryBiomes:
+          type: array
+          description: Contagem por bioma principal ("mundo" do Kids), no formato de `biomes`.
+          items: { $ref: '#/components/schemas/BiomeCount' }
+    Featured:
+      type: object
+      required: [date, species, audio]
+      properties:
+        date: { type: string, format: date, description: 'Data da ave (AAAA-MM-DD, fuso de São Paulo).' }
+        species: { $ref: '#/components/schemas/SpeciesSummary' }
+        audio:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Audio'
     FieldError:
       type: object
       required: [field, reason]
@@ -373,7 +466,7 @@ components:
         status: { type: integer }
         code:
           type: string
-          enum: [INVALID_PARAMETER, SPECIES_NOT_FOUND, NOT_FOUND, METHOD_NOT_ALLOWED, RATE_LIMITED, SERVICE_UNAVAILABLE, INTERNAL]
+          enum: [INVALID_PARAMETER, SPECIES_NOT_FOUND, FEATURED_NOT_FOUND, NOT_FOUND, METHOD_NOT_ALLOWED, RATE_LIMITED, SERVICE_UNAVAILABLE, INTERNAL]
         requestId: { type: string }
         errors:
           type: array
