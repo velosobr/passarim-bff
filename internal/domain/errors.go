@@ -27,6 +27,7 @@ const (
 	KindNotFound                    // gRPC NotFound
 	KindInvalidArgument             // gRPC InvalidArgument (ou validação nossa)
 	KindCanceled                    // o cliente desistiu
+	KindUnimplemented               // gRPC Unimplemented: o catalog ainda não tem o método (versão anterior)
 )
 
 // String devolve o nome do Kind, usado em logs e mensagens de erro. Ter um
@@ -34,7 +35,7 @@ const (
 // impresso com fmt ou slog. "[...]string{...}" é um array cujo tamanho o
 // compilador conta sozinho; o índice é o próprio Kind.
 func (k Kind) String() string {
-	return [...]string{"Internal", "Unavailable", "Timeout", "Upstream", "CircuitOpen", "NotFound", "InvalidArgument", "Canceled"}[k]
+	return [...]string{"Internal", "Unavailable", "Timeout", "Upstream", "CircuitOpen", "NotFound", "InvalidArgument", "Canceled", "Unimplemented"}[k]
 }
 
 // Retryable: vale a pena tentar de novo? Só falhas passageiras.
@@ -56,8 +57,11 @@ func (k Kind) CountsForBreaker() bool {
 // circuito aberto): um dado de algumas horas atrás é melhor que um erro. Não
 // quando a resposta é legítima, como um 404: servir uma espécie "velha" que
 // não existe mais seria mentir.
+//
+// KindUnimplemented também libera: o catalog voltou para uma versão sem o
+// método (um deploy desfeito), e a resposta guardada antes continua certa.
 func (k Kind) AllowsStale() bool {
-	return k == KindUnavailable || k == KindTimeout || k == KindUpstream || k == KindCircuitOpen
+	return k == KindUnavailable || k == KindTimeout || k == KindUpstream || k == KindCircuitOpen || k == KindUnimplemented
 }
 
 // Error carrega o Kind e a causa original (a causa vai SÓ para logs: nunca para a resposta HTTP).
