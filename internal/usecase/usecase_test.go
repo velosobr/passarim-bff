@@ -22,6 +22,8 @@ type fakeCatalog struct {
 	calls       int
 	lastQuery   domain.ListQuery
 	lastID      string
+	lastFilters domain.FiltersQuery
+	lastDate    string
 	deadline    time.Time
 	hasDeadline bool
 	err         error
@@ -34,7 +36,7 @@ func (f *fakeCatalog) note(ctx context.Context) {
 	f.deadline, f.hasDeadline = ctx.Deadline()
 }
 
-// Os três métodos abaixo registram a chamada e devolvem respostas fixas.
+// Os quatro métodos abaixo registram a chamada e devolvem respostas fixas.
 func (f *fakeCatalog) ListSpecies(ctx context.Context, q domain.ListQuery) (domain.SpeciesPage, error) {
 	f.note(ctx)
 	f.lastQuery = q
@@ -47,9 +49,16 @@ func (f *fakeCatalog) GetSpecies(ctx context.Context, id string) (domain.Species
 	return domain.Species{ID: id}, f.err
 }
 
-func (f *fakeCatalog) ListFilters(ctx context.Context) (domain.Filters, error) {
+func (f *fakeCatalog) ListFilters(ctx context.Context, q domain.FiltersQuery) (domain.Filters, error) {
 	f.note(ctx)
+	f.lastFilters = q
 	return domain.Filters{}, f.err
+}
+
+func (f *fakeCatalog) GetFeatured(ctx context.Context, date string) (domain.Featured, error) {
+	f.note(ctx)
+	f.lastDate = date
+	return domain.Featured{Species: domain.Summary{ID: "turdus-rufiventris"}}, f.err
 }
 
 // limit=999 é inválido: o caso de uso devolve o erro de validação e o
@@ -98,7 +107,7 @@ func TestGetSpecies_ValidatesIDAndAppliesBudget(t *testing.T) {
 func TestListFilters_AppliesBudgetAndPropagatesErrors(t *testing.T) {
 	f := &fakeCatalog{err: domain.NewError(domain.KindUnavailable, errors.New("x"))}
 	uc := usecase.ListFilters{Catalog: f, Budget: time.Second}
-	if _, err := uc.Run(context.Background()); domain.KindOf(err) != domain.KindUnavailable || !f.hasDeadline {
+	if _, err := uc.Run(context.Background(), domain.RawFiltersQuery{}); domain.KindOf(err) != domain.KindUnavailable || !f.hasDeadline {
 		t.Fatalf("o erro do catalog deve passar intacto e com orçamento: %v", err)
 	}
 }
@@ -112,5 +121,37 @@ func TestBudgetDoesNotExtendAnEarlierDeadline(t *testing.T) {
 	_, _ = usecase.GetSpecies{Catalog: f, Budget: 3 * time.Second}.Run(ctx, "a")
 	if time.Until(f.deadline) > 600*time.Millisecond {
 		t.Fatal("o orçamento nunca pode ESTENDER o prazo que o chamador já tinha")
+	}
+}
+
+// A audiência chega validada ao catalog; uma inválida nem chega.
+func TestListFilters_ValidatesAudience(t *testing.T) {
+	f := &fakeCatalog{}
+	uc := usecase.ListFilters{Catalog: f, Budget: time.Second}
+	if _, err := uc.Run(context.Background(), domain.RawFiltersQuery{Audience: "kids"}); err != nil || f.lastFilters.Audience != domain.AudienceKids {
+		t.Fatalf("err=%v consulta=%+v", err, f.lastFilters)
+	}
+	if _, err := uc.Run(context.Background(), domain.RawFiltersQuery{Audience: "x"}); domain.KindOf(err) != domain.KindInvalidArgument || f.calls != 1 {
+		t.Fatalf("audiência inválida não pode chegar ao catalog: %v calls=%d", err, f.calls)
+	}
+}
+
+// A data é a de São Paulo, não a de UTC: às 01h de UTC do dia 6 ainda é dia
+// 5 em São Paulo, e faltam 2 h (7200 s) para a meia-noite de lá.
+func TestGetFeatured_DateInSaoPauloAndMaxAge(t *testing.T) {
+	f := &fakeCatalog{}
+	now := func() time.Time { return time.Date(2026, 11, 6, 1, 0, 0, 0, time.UTC) }
+	out, err := usecase.GetFeatured{Catalog: f, Budget: time.Second, Now: now}.Run(context.Background())
+	if err != nil || f.lastDate != "2026-11-05" || out.Date != "2026-11-05" || out.MaxAge != 7200 || out.Featured.Species.ID == "" || !f.hasDeadline {
+		t.Fatalf("out=%+v err=%v data pedida=%q", out, err, f.lastDate)
+	}
+}
+
+// O erro do catalog (sem ave elegível) passa intacto.
+func TestGetFeatured_PropagatesNotFound(t *testing.T) {
+	f := &fakeCatalog{err: domain.NewError(domain.KindNotFound, errors.New("x"))}
+	_, err := usecase.GetFeatured{Catalog: f, Budget: time.Second, Now: time.Now}.Run(context.Background())
+	if domain.KindOf(err) != domain.KindNotFound {
+		t.Fatalf("esperava NotFound, veio %v", err)
 	}
 }
