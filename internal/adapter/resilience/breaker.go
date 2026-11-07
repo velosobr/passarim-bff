@@ -107,7 +107,7 @@ func guard[T any](b *breaker, fn func() (T, error)) (T, error) {
 	return v.(T), nil
 }
 
-// Os três métodos passam pela mesma proteção: um só breaker para o catalog.
+// Os quatro métodos passam pela mesma proteção: um só breaker para o catalog.
 func (b *breaker) ListSpecies(ctx context.Context, q domain.ListQuery) (domain.SpeciesPage, error) {
 	return guard(b, func() (domain.SpeciesPage, error) { return b.next.ListSpecies(ctx, q) })
 }
@@ -116,6 +116,10 @@ func (b *breaker) GetSpecies(ctx context.Context, id string) (domain.Species, er
 	return guard(b, func() (domain.Species, error) { return b.next.GetSpecies(ctx, id) })
 }
 
-func (b *breaker) ListFilters(ctx context.Context) (domain.Filters, error) {
-	return guard(b, func() (domain.Filters, error) { return b.next.ListFilters(ctx) })
+func (b *breaker) ListFilters(ctx context.Context, q domain.FiltersQuery) (domain.Filters, error) {
+	return guard(b, func() (domain.Filters, error) { return b.next.ListFilters(ctx, q) })
+}
+
+func (b *breaker) GetFeatured(ctx context.Context, date string) (domain.Featured, error) {
+	return guard(b, func() (domain.Featured, error) { return b.next.GetFeatured(ctx, date) })
 }
