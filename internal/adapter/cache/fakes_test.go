@@ -80,7 +80,7 @@ type fakeCatalog struct {
 	entered chan struct{} // avisa que a chamada começou (se não for nil)
 }
 
-// wait é o miolo das três chamadas: conta, avisa (sem bloquear, graças ao
+// wait é o miolo das quatro chamadas: conta, avisa (sem bloquear, graças ao
 // default do select), espera o gate ou o fim do contexto e devolve o erro
 // configurado. select espera o primeiro de vários canais que ficar pronto.
 func (f *fakeCatalog) wait(ctx context.Context) error {
@@ -101,7 +101,7 @@ func (f *fakeCatalog) wait(ctx context.Context) error {
 	return f.err
 }
 
-// Os três métodos devolvem dados fixos. Na lista, o nome comum leva o texto
+// Os quatro métodos devolvem dados fixos. Na lista, o nome comum leva o texto
 // buscado, para o teste saber qual consulta chegou ao catalog.
 func (f *fakeCatalog) ListSpecies(ctx context.Context, q domain.ListQuery) (domain.SpeciesPage, error) {
 	if err := f.wait(ctx); err != nil {
@@ -119,11 +119,19 @@ func (f *fakeCatalog) GetSpecies(ctx context.Context, id string) (domain.Species
 	return s, nil
 }
 
-func (f *fakeCatalog) ListFilters(ctx context.Context) (domain.Filters, error) {
+func (f *fakeCatalog) ListFilters(ctx context.Context, _ domain.FiltersQuery) (domain.Filters, error) {
 	if err := f.wait(ctx); err != nil {
 		return domain.Filters{}, err
 	}
-	return domain.Filters{Biomes: []domain.BiomeCount{{Biome: domain.BiomePampa, SpeciesCount: 3}}}, nil
+	return domain.Filters{Biomes: []domain.BiomeCount{{Biome: domain.BiomePampa, SpeciesCount: 3}},
+		PrimaryBiomes: []domain.BiomeCount{{Biome: domain.BiomePampa, SpeciesCount: 2}}}, nil
+}
+
+func (f *fakeCatalog) GetFeatured(ctx context.Context, _ string) (domain.Featured, error) {
+	if err := f.wait(ctx); err != nil {
+		return domain.Featured{}, err
+	}
+	return domain.Featured{Species: domain.Summary{ID: "turdus-rufiventris"}, Audio: &domain.Audio{Key: "a", Peaks: []float32{1}}}, nil
 }
 
 // clock é um relógio falso: Now devolve a hora guardada e Advance a empurra

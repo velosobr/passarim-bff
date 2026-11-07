@@ -164,16 +164,24 @@ func cached[T, D any](ctx context.Context, c *cache, key string, call func(conte
 	}
 }
 
-// Os três métodos abaixo fazem do cache um CatalogReader: cada um só escolhe
+// Os quatro métodos abaixo fazem do cache um CatalogReader: cada um só escolhe
 // a chave e as funções de conversão e delega a cached.
 func (c *cache) GetSpecies(ctx context.Context, id string) (domain.Species, error) {
 	return cached(ctx, c, speciesKey(id),
 		func(cx context.Context) (domain.Species, error) { return c.next.GetSpecies(cx, id) }, speciesTo, speciesFrom)
 }
 
-func (c *cache) ListFilters(ctx context.Context) (domain.Filters, error) {
-	return cached(ctx, c, filtersKey,
-		func(cx context.Context) (domain.Filters, error) { return c.next.ListFilters(cx) }, filtersTo, filtersFrom)
+func (c *cache) ListFilters(ctx context.Context, q domain.FiltersQuery) (domain.Filters, error) {
+	return cached(ctx, c, filtersKey(q.Audience),
+		func(cx context.Context) (domain.Filters, error) { return c.next.ListFilters(cx, q) }, filtersTo, filtersFrom)
+}
+
+// GetFeatured guarda a "Ave do dia" na chave da data, com o mesmo fresco,
+// velho e singleflight das outras respostas. Dentro do dia, um catalog fora
+// do ar serve a ave já guardada; no dia seguinte, a chave é outra.
+func (c *cache) GetFeatured(ctx context.Context, date string) (domain.Featured, error) {
+	return cached(ctx, c, featuredKey(date),
+		func(cx context.Context) (domain.Featured, error) { return c.next.GetFeatured(cx, date) }, featuredTo, featuredFrom)
 }
 
 func (c *cache) ListSpecies(ctx context.Context, q domain.ListQuery) (domain.SpeciesPage, error) {

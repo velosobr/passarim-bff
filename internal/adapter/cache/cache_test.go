@@ -18,7 +18,7 @@ import (
 
 // env junta as peças de um teste: o catalog falso, o store em memória, o
 // relógio, as métricas e o cache montado sobre eles. O campo c é declarado
-// com uma interface anônima com os três métodos, o mesmo formato do
+// com uma interface anônima com os quatro métodos, o mesmo formato do
 // CatalogReader.
 type env struct {
 	cat   *fakeCatalog
@@ -28,7 +28,8 @@ type env struct {
 	c     interface {
 		ListSpecies(context.Context, domain.ListQuery) (domain.SpeciesPage, error)
 		GetSpecies(context.Context, string) (domain.Species, error)
-		ListFilters(context.Context) (domain.Filters, error)
+		ListFilters(context.Context, domain.FiltersQuery) (domain.Filters, error)
+		GetFeatured(context.Context, string) (domain.Featured, error)
 	}
 }
 
@@ -61,7 +62,7 @@ func TestCache_MissThenHitWhileFresh(t *testing.T) {
 	if err != nil || s.ID != "sabia" || meta2.Cache() != "hit" || e.cat.calls.Load() != 1 {
 		t.Fatalf("2ª deveria ser hit sem chamar o catalog: err=%v cache=%q calls=%d", err, meta2.Cache(), e.cat.calls.Load())
 	}
-	if e.store.ttls["bff:v1:species:sabia"] != 24*time.Hour {
+	if e.store.ttls["bff:v2:species:sabia"] != 24*time.Hour {
 		t.Fatalf("o TTL no Redis é a janela de stale (24h): %v", e.store.ttls)
 	}
 	if e.m.count("miss") != 1 || e.m.count("hit") != 1 {
@@ -134,7 +135,7 @@ func TestCache_SearchBypassesCache(t *testing.T) {
 
 // A lista sem busca entra no cache: a mesma consulta usa a mesma chave, e
 // mudar o limit, a UF ou o cursor gera outra chave, sempre no padrão
-// bff:v1:list:<sha256>.
+// bff:v2:list:<sha256>.
 func TestCache_ListWithoutSearchIsCachedAndKeyIsNormalized(t *testing.T) {
 	e := newEnv(t)
 	q := domain.ListQuery{State: "SP", Biome: domain.BiomeCerrado, Limit: 20}
@@ -150,19 +151,60 @@ func TestCache_ListWithoutSearchIsCachedAndKeyIsNormalized(t *testing.T) {
 		t.Fatalf("limit, estado e cursor diferentes geram chaves diferentes: %v", e.store.keys())
 	}
 	for _, k := range e.store.keys() {
-		if len(k) < len("bff:v1:list:")+64 || k[:12] != "bff:v1:list:" {
-			t.Errorf("chave fora do padrão bff:v1:list:{sha256}: %s", k)
+		if len(k) < len("bff:v2:list:")+64 || k[:12] != "bff:v2:list:" {
+			t.Errorf("chave fora do padrão bff:v2:list:{sha256}: %s", k)
 		}
 	}
 }
 
-// Os filtros ficam na chave fixa bff:v1:filters.
+// Os filtros ficam numa chave por audiência: bff:v2:filters:adult e
+// bff:v2:filters:kids.
 func TestCache_FiltersAreCached(t *testing.T) {
 	e := newEnv(t)
-	_, _ = e.c.ListFilters(context.Background())
-	f, err := e.c.ListFilters(context.Background())
-	if err != nil || len(f.Biomes) != 1 || e.cat.calls.Load() != 1 || e.store.keys()[0] != "bff:v1:filters" {
+	adult := domain.FiltersQuery{Audience: domain.AudienceAdult}
+	_, _ = e.c.ListFilters(context.Background(), adult)
+	f, err := e.c.ListFilters(context.Background(), adult)
+	if err != nil || len(f.Biomes) != 1 || len(f.PrimaryBiomes) != 1 || e.cat.calls.Load() != 1 || e.store.keys()[0] != "bff:v2:filters:adult" {
 		t.Fatalf("filtros: %+v err=%v calls=%d keys=%v", f, err, e.cat.calls.Load(), e.store.keys())
+	}
+	_, _ = e.c.ListFilters(context.Background(), domain.FiltersQuery{Audience: domain.AudienceKids})
+	if e.cat.calls.Load() != 2 || len(e.store.keys()) != 2 {
+		t.Fatalf("a audiência kids tem a própria chave: calls=%d keys=%v", e.cat.calls.Load(), e.store.keys())
+	}
+}
+
+// A audiência e o bioma principal entram no hash da lista: a mesma consulta
+// nas duas jornadas (ou em dois mundos) não divide a mesma chave.
+func TestCache_ListKeyIncludesAudienceAndPrimaryBiome(t *testing.T) {
+	e := newEnv(t)
+	for _, q := range []domain.ListQuery{
+		{Limit: 20, Audience: domain.AudienceAdult},
+		{Limit: 20, Audience: domain.AudienceKids},
+		{Limit: 20, Audience: domain.AudienceKids, PrimaryBiome: domain.BiomePampa},
+	} {
+		_, _ = e.c.ListSpecies(context.Background(), q)
+	}
+	if len(e.store.keys()) != 3 {
+		t.Fatalf("esperava 3 chaves, veio %v", e.store.keys())
+	}
+}
+
+// A "Ave do dia" fica na chave da data. Dentro do dia, com o catalog fora
+// do ar, sai a ave guardada; no dia seguinte a chave é outra, e sem
+// candidato o erro aparece: a ave de ontem nunca sai.
+func TestCache_FeaturedIsKeyedByDate(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.c.GetFeatured(context.Background(), "2026-11-05"); err != nil || e.store.keys()[0] != "bff:v2:featured:2026-11-05" {
+		t.Fatalf("err=%v keys=%v", err, e.store.keys())
+	}
+	e.clk.Advance(11 * time.Minute)
+	e.cat.err = domain.NewError(domain.KindUnavailable, errors.New("fora"))
+	ctx, meta := ctxWithMeta()
+	if f, err := e.c.GetFeatured(ctx, "2026-11-05"); err != nil || f.Species.ID != "turdus-rufiventris" || meta.Cache() != "stale" {
+		t.Fatalf("dentro do dia sai a guardada: %+v %v %q", f, err, meta.Cache())
+	}
+	if _, err := e.c.GetFeatured(context.Background(), "2026-11-06"); domain.KindOf(err) != domain.KindUnavailable {
+		t.Fatalf("no dia seguinte não há candidato: %v", err)
 	}
 }
 
@@ -170,12 +212,12 @@ func TestCache_FiltersAreCached(t *testing.T) {
 // sobrescreve.
 func TestCache_InvalidEnvelopeIsMiss(t *testing.T) {
 	e := newEnv(t)
-	e.store.data["bff:v1:species:sabia"] = []byte("{isto não é um envelope")
+	e.store.data["bff:v2:species:sabia"] = []byte("{isto não é um envelope")
 	ctx, meta := ctxWithMeta()
 	if _, err := e.c.GetSpecies(ctx, "sabia"); err != nil || meta.Cache() != "miss" || e.cat.calls.Load() != 1 {
 		t.Fatalf("envelope inválido = miss: err=%v cache=%q calls=%d", err, meta.Cache(), e.cat.calls.Load())
 	}
-	if string(e.store.data["bff:v1:species:sabia"]) == "{isto não é um envelope" {
+	if string(e.store.data["bff:v2:species:sabia"]) == "{isto não é um envelope" {
 		t.Fatal("o envelope ruim deveria ser sobrescrito pelo bom")
 	}
 }
@@ -300,9 +342,11 @@ func TestCache_DetailRoundTripKeepsEveryField(t *testing.T) {
 		CommonName: "Sabiá", ScientificName: "Turdus rufiventris", Family: "Turdidae", SizeCm: &size, Diet: &diet, Conservation: "LC",
 		Description: "d", DescriptionCredit: domain.Credit{Author: "a", License: "l", Source: "s", SourceURL: "u"},
 		Facts: []domain.Fact{{Text: "t", Source: "s"}}, Biomes: []domain.Biome{domain.BiomeCerrado}, States: []string{"SP"},
-		Photos:   []domain.Photo{{ThumbKey: "t", MediumKey: "m", LargeKey: "l", Width: 1, Height: 2, Credit: domain.Credit{Author: "p"}}},
-		Audio:    &domain.Audio{Key: "k", DurationMs: 5, Credit: domain.Credit{Author: "z"}},
-		Clusters: []domain.Cluster{{Lat: 1, Lng: 2, Count: 3, Precision: 0.5}},
+		Photos:       []domain.Photo{{ThumbKey: "t", MediumKey: "m", LargeKey: "l", Width: 1, Height: 2, Credit: domain.Credit{Author: "p"}}},
+		Audio:        &domain.Audio{Key: "k", DurationMs: 5, Credit: domain.Credit{Author: "z"}, Peaks: []float32{0, 1}},
+		Clusters:     []domain.Cluster{{Lat: 1, Lng: 2, Count: 3, Precision: 0.5}},
+		PrimaryBiome: domain.BiomeCerrado,
+		Kids:         &domain.KidsContent{Description: "kd", Facts: []string{"kf"}, DidYouKnow: "kv"},
 	}
 	first, _ := e.c.GetSpecies(context.Background(), "sabia")
 	second, err := e.c.GetSpecies(context.Background(), "sabia") // veio do Redis
@@ -311,7 +355,9 @@ func TestCache_DetailRoundTripKeepsEveryField(t *testing.T) {
 	}
 	if e.cat.calls.Load() != 1 || second.CommonName != first.CommonName || *second.SizeCm != 23 || *second.Diet != "frutos" ||
 		second.Audio == nil || second.Audio.Key != "k" || len(second.Photos) != 1 || second.Photos[0].LargeKey != "l" ||
-		len(second.Clusters) != 1 || second.Clusters[0].Precision != 0.5 || len(second.Biomes) != 1 || second.States[0] != "SP" || second.Facts[0].Text != "t" {
+		len(second.Clusters) != 1 || second.Clusters[0].Precision != 0.5 || len(second.Biomes) != 1 || second.States[0] != "SP" || second.Facts[0].Text != "t" ||
+		second.PrimaryBiome != domain.BiomeCerrado || second.Kids == nil || second.Kids.Facts[0] != "kf" || second.Kids.DidYouKnow != "kv" ||
+		len(second.Audio.Peaks) != 2 || second.Audio.Peaks[1] != 1 {
 		t.Fatalf("o que sai do cache precisa ser igual ao que entrou: %+v", second)
 	}
 	// Mantém o import de errors em uso neste arquivo.
