@@ -55,6 +55,13 @@ e cai com `back-end-down`; `back-end-status` diz se a API está pronta para test
 ## Contrato e design
 
 - Contrato REST: [`openapi.yaml`](openapi.yaml) (validado por teste de contrato com `kin-openapi`).
+- **Jornada Kids e "Ave do dia" (frente B):**
+  - `?audience=adult|kids` em `/v1/species` e `/v1/filters` (padrão `adult`); `kids` traz só as aves com conteúdo Kids;
+  - `?primaryBiome=` em `/v1/species` filtra pelo "mundo" da ave no Kids, e `/v1/filters` traz `primaryBiomes`;
+  - o detalhe ganha `kids` e `primaryBiome` (os dois `null` quando a ave não tem) e `audio.peaks`, os 64 picos da forma de onda;
+  - `GET /v1/featured` devolve a "Ave do dia" de hoje em São Paulo, com `max-age` até a meia-noite de lá;
+  - o cache usa o prefixo `bff:v2:` desde essa mudança (ADR-0016).
+  - Spec: [`frente-b-kids-design`](https://github.com/velosobr/passarim-docs/blob/main/docs/superpowers/specs/2026-10-28-passarim-frente-b-kids-design.md), seção 7.
 - Spec de design: [`passarim-bff-design`](https://github.com/velosobr/passarim-docs/blob/main/docs/superpowers/specs/2026-10-03-passarim-bff-design.md).
 - ADRs: [0015 (rate limit)](https://github.com/velosobr/passarim-docs/blob/main/docs/adr/0015-rate-limit-em-memoria-por-replica.md)
   e [0016 (cache e stale-while-error)](https://github.com/velosobr/passarim-docs/blob/main/docs/adr/0016-cache-com-envelope-e-stale-while-error.md).
