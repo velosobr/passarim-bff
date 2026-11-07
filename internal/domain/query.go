@@ -53,6 +53,7 @@ func (e *ValidationError) Error() string { return "parâmetros inválidos" }
 // de quem chamou.
 type RawListQuery struct {
 	Q, Biome, State, Cursor, Limit string
+	Audience, PrimaryBiome         string // frente B: ?audience=adult|kids e ?primaryBiome=
 	Repeated                       []string
 }
 
@@ -62,12 +63,18 @@ type RawListQuery struct {
 // ListQuery sabe que ele já passou pelas regras, sem precisar conferir de
 // novo. Como ele só é criado por NewListQuery, não existe ListQuery inválido
 // circulando pelo código.
+//
+// Audience e PrimaryBiome são da frente B: kids deixa só as aves com
+// conteúdo Kids, e PrimaryBiome filtra pelo "mundo" da ave no Kids
+// (diferente de Biome, que filtra por qualquer bioma em que a ave vive).
 type ListQuery struct {
-	Q      string
-	Biome  Biome
-	State  string
-	Cursor string
-	Limit  int
+	Q            string
+	Biome        Biome
+	State        string
+	Cursor       string
+	Limit        int
+	Audience     Audience
+	PrimaryBiome Biome
 }
 
 // NewListQuery valida e normaliza. Devolve *ValidationError com todos os campos ruins.
@@ -77,7 +84,7 @@ type ListQuery struct {
 // usado.
 func NewListQuery(raw RawListQuery) (ListQuery, error) {
 	var bad []FieldError
-	q := ListQuery{Limit: DefaultLimit}
+	q := ListQuery{Limit: DefaultLimit, Audience: AudienceAdult}
 
 	for _, f := range raw.Repeated {
 		bad = append(bad, FieldError{f, "não pode ser repetido"})
@@ -106,6 +113,18 @@ func NewListQuery(raw RawListQuery) (ListQuery, error) {
 			bad = append(bad, FieldError{"biome", "bioma desconhecido"})
 		}
 	}
+	if a, ok := ParseAudience(raw.Audience); ok {
+		q.Audience = a
+	} else {
+		bad = append(bad, audienceError)
+	}
+	if raw.PrimaryBiome != "" {
+		if b, ok := ParseBiome(raw.PrimaryBiome); ok {
+			q.PrimaryBiome = b
+		} else {
+			bad = append(bad, FieldError{"primaryBiome", "bioma desconhecido"})
+		}
+	}
 	if raw.State != "" {
 		if uf, ok := NormalizeUF(raw.State); ok {
 			q.State = uf
@@ -132,6 +151,37 @@ func NewListQuery(raw RawListQuery) (ListQuery, error) {
 		return ListQuery{}, &ValidationError{Fields: bad}
 	}
 	return q, nil
+}
+
+// audienceError é o problema de um ?audience= que não é adult nem kids.
+var audienceError = FieldError{"audience", "use adult ou kids"}
+
+// RawFiltersQuery são os parâmetros crus de /v1/filters (frente B).
+type RawFiltersQuery struct {
+	Audience string
+	Repeated []string
+}
+
+// FiltersQuery é a consulta dos filtros já validada: a audiência decide se
+// as contagens consideram todas as aves ou só as que têm conteúdo Kids.
+type FiltersQuery struct {
+	Audience Audience
+}
+
+// NewFiltersQuery valida os parâmetros de /v1/filters, como NewListQuery.
+func NewFiltersQuery(raw RawFiltersQuery) (FiltersQuery, error) {
+	var bad []FieldError
+	for _, f := range raw.Repeated {
+		bad = append(bad, FieldError{f, "não pode ser repetido"})
+	}
+	a, ok := ParseAudience(raw.Audience)
+	if !ok {
+		bad = append(bad, audienceError)
+	}
+	if len(bad) > 0 {
+		return FiltersQuery{}, &ValidationError{Fields: bad}
+	}
+	return FiltersQuery{Audience: a}, nil
 }
 
 // O cursor é opaco para nós, mas vem do cliente: só repassamos se parecer base64url curto.

@@ -17,6 +17,7 @@ import (
 	"github.com/velosobr/passarim-bff/internal/adapter/media"
 	"github.com/velosobr/passarim-bff/internal/adapter/reqmeta"
 	"github.com/velosobr/passarim-bff/internal/domain"
+	"github.com/velosobr/passarim-bff/internal/usecase"
 )
 
 // Fakes dos casos de uso: o handler só conhece as interfaces.
@@ -43,9 +44,20 @@ func (f *fakeGet) Run(context.Context, string) (domain.Species, error) { return 
 type fakeFilters struct {
 	f   domain.Filters
 	err error
+	got domain.RawFiltersQuery
 }
 
-func (f *fakeFilters) Run(context.Context) (domain.Filters, error) { return f.f, f.err }
+func (f *fakeFilters) Run(_ context.Context, raw domain.RawFiltersQuery) (domain.Filters, error) {
+	f.got = raw
+	return f.f, f.err
+}
+
+type fakeFeatured struct {
+	out usecase.FeaturedOutput
+	err error
+}
+
+func (f *fakeFeatured) Run(context.Context) (usecase.FeaturedOutput, error) { return f.out, f.err }
 
 // base é a MEDIA_BASE_URL dos testes.
 const base = "http://localhost:8888/buckets/passarim-media"
@@ -53,11 +65,17 @@ const base = "http://localhost:8888/buckets/passarim-media"
 // newHandler monta só as rotas (sem middlewares) com os fakes.
 func newHandler(t *testing.T, l *fakeList, g *fakeGet, f *fakeFilters) http.Handler {
 	t.Helper()
+	return newHandlerWithFeatured(t, l, g, f, &fakeFeatured{})
+}
+
+// newHandlerWithFeatured é o newHandler com a "Ave do dia" escolhida pelo teste.
+func newHandlerWithFeatured(t *testing.T, l *fakeList, g *fakeGet, f *fakeFilters, fe *fakeFeatured) http.Handler {
+	t.Helper()
 	m, err := media.New(base, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &httpadapter.Handler{List: l, Get: g, Filters: f, Media: m, Log: slog.New(slog.DiscardHandler)}
+	h := &httpadapter.Handler{List: l, Get: g, Filters: f, Featured: fe, Media: m, Log: slog.New(slog.DiscardHandler)}
 	return h.Routes()
 }
 
@@ -289,9 +307,10 @@ func TestRouteNotFound_IsProblemJSON(t *testing.T) {
 	}
 }
 
-// As quatro falhas do catalog viram 503 SERVICE_UNAVAILABLE.
+// As quatro falhas do catalog e o Unimplemented (catalog numa versão sem o
+// método) viram 503 SERVICE_UNAVAILABLE.
 func TestUpstreamErrors_503(t *testing.T) {
-	for _, k := range []domain.Kind{domain.KindUnavailable, domain.KindTimeout, domain.KindUpstream, domain.KindCircuitOpen} {
+	for _, k := range []domain.Kind{domain.KindUnavailable, domain.KindTimeout, domain.KindUpstream, domain.KindCircuitOpen, domain.KindUnimplemented} {
 		g := &fakeGet{err: domain.NewError(k, errors.New("x"))}
 		rec := do(newHandler(t, &fakeList{}, g, &fakeFilters{}), "GET", "/v1/species/x")
 		if b := decode(t, rec); rec.Code != 503 || b["code"] != "SERVICE_UNAVAILABLE" {
@@ -346,5 +365,86 @@ func TestCanceledRequest_NoBodyAndStatus499(t *testing.T) {
 	rec := do(newHandler(t, &fakeList{}, g, &fakeFilters{}), "GET", "/v1/species/x")
 	if rec.Code != 499 || rec.Body.Len() != 0 {
 		t.Fatalf("cliente que desistiu: status %d, corpo %q", rec.Code, rec.Body.String())
+	}
+}
+
+// audience e primaryBiome chegam ao caso de uso como vieram; um parâmetro
+// repetido é marcado.
+func TestListSpecies_AudienceAndPrimaryBiome(t *testing.T) {
+	l := &fakeList{}
+	do(newHandler(t, l, &fakeGet{}, &fakeFilters{}), "GET", "/v1/species?audience=kids&primaryBiome=pampa&audience=adult")
+	if l.got.Audience != "kids" || l.got.PrimaryBiome != "pampa" || len(l.got.Repeated) != 1 || l.got.Repeated[0] != "audience" {
+		t.Fatalf("consulta: %+v", l.got)
+	}
+}
+
+// Os filtros recebem a audiência e devolvem primaryBiomes no formato de biomes.
+func TestListFilters_AudienceAndPrimaryBiomes(t *testing.T) {
+	f := &fakeFilters{f: domain.Filters{PrimaryBiomes: []domain.BiomeCount{{Biome: domain.BiomeCerrado, SpeciesCount: 4}}}}
+	b := decode(t, do(newHandler(t, &fakeList{}, &fakeGet{}, f), "GET", "/v1/filters?audience=kids"))
+	pb := b["primaryBiomes"].([]any)[0].(map[string]any)
+	if f.got.Audience != "kids" || pb["code"] != "cerrado" || pb["label"] != "Cerrado" || pb["speciesCount"].(float64) != 4 {
+		t.Fatalf("consulta=%+v filtros=%v", f.got, b)
+	}
+}
+
+// O detalhe traz kids (fatos só com o texto), primaryBiome e os picos.
+// Sem Kids e sem bioma principal, os dois saem null; um canto sem picos sai
+// com peaks [] (nunca null).
+func TestGetSpecies_KidsPrimaryBiomeAndPeaks(t *testing.T) {
+	g := &fakeGet{sp: domain.Species{ID: "t", PrimaryBiome: domain.BiomeCerrado,
+		Kids:  &domain.KidsContent{Description: "D", Facts: []string{"F"}, DidYouKnow: "V"},
+		Audio: &domain.Audio{Key: "species/t/a.aac", Peaks: []float32{0, 1}}}}
+	b := decode(t, do(newHandler(t, &fakeList{}, g, &fakeFilters{}), "GET", "/v1/species/t"))
+	kids := b["kids"].(map[string]any)
+	if b["primaryBiome"] != "cerrado" || kids["description"] != "D" || kids["didYouKnow"] != "V" ||
+		kids["facts"].([]any)[0].(map[string]any)["text"] != "F" || len(b["audio"].(map[string]any)["peaks"].([]any)) != 2 {
+		t.Fatalf("detalhe: %v", b)
+	}
+	g = &fakeGet{sp: domain.Species{ID: "t", Audio: &domain.Audio{Key: "species/t/a.aac"}}}
+	b = decode(t, do(newHandler(t, &fakeList{}, g, &fakeFilters{}), "GET", "/v1/species/t"))
+	if b["kids"] != nil || b["primaryBiome"] != nil || b["audio"].(map[string]any)["peaks"] == nil {
+		t.Fatalf("sem Kids: %v", b)
+	}
+}
+
+// A "Ave do dia" sai com a data, o card, o canto com os picos e o max-age
+// até a meia-noite de São Paulo.
+func TestFeatured_OK(t *testing.T) {
+	fe := &fakeFeatured{out: usecase.FeaturedOutput{Date: "2026-11-05", MaxAge: 7200, Featured: domain.Featured{
+		Species: domain.Summary{ID: "t", CommonName: "Sabiá", PrimaryBiome: domain.BiomeMataAtlantica, ThumbnailKey: "species/t/thumb.webp"},
+		Audio:   &domain.Audio{Key: "species/t/a.aac", DurationMs: 3000, Peaks: []float32{1}}}}}
+	rec := do(newHandlerWithFeatured(t, &fakeList{}, &fakeGet{}, &fakeFilters{}, fe), "GET", "/v1/featured")
+	b := decode(t, rec)
+	sp := b["species"].(map[string]any)
+	if rec.Code != 200 || b["date"] != "2026-11-05" || sp["id"] != "t" || sp["primaryBiome"] != "mata_atlantica" ||
+		b["audio"].(map[string]any)["peaks"].([]any)[0].(float64) != 1 || rec.Header().Get("Cache-Control") != "public, max-age=7200" {
+		t.Fatalf("%d %v %v", rec.Code, b, rec.Header())
+	}
+	fe.out.Featured.Audio = nil
+	if b := decode(t, do(newHandlerWithFeatured(t, &fakeList{}, &fakeGet{}, &fakeFilters{}, fe), "GET", "/v1/featured")); b["audio"] != nil {
+		t.Fatalf("sem canto, audio é null: %v", b)
+	}
+}
+
+// Os erros da "Ave do dia" (spec da frente B, seção 7): sem ave elegível,
+// 404; data recusada pelo catalog, 500; catalog numa versão antiga ou fora
+// do ar, 503.
+func TestFeatured_Errors(t *testing.T) {
+	cases := map[domain.Kind]struct {
+		status int
+		code   string
+	}{
+		domain.KindNotFound:        {404, "FEATURED_NOT_FOUND"},
+		domain.KindInvalidArgument: {500, "INTERNAL"},
+		domain.KindUnimplemented:   {503, "SERVICE_UNAVAILABLE"},
+		domain.KindUnavailable:     {503, "SERVICE_UNAVAILABLE"},
+	}
+	for kind, want := range cases {
+		fe := &fakeFeatured{err: domain.NewError(kind, errors.New("x"))}
+		rec := do(newHandlerWithFeatured(t, &fakeList{}, &fakeGet{}, &fakeFilters{}, fe), "GET", "/v1/featured")
+		if b := decode(t, rec); rec.Code != want.status || b["code"] != want.code {
+			t.Errorf("%s → %d %v, esperava %d %s", kind, rec.Code, b, want.status, want.code)
+		}
 	}
 }

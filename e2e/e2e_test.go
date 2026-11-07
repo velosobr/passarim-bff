@@ -156,6 +156,23 @@ func TestE2E_BFFWithRealCatalog(t *testing.T) {
 			t.Fatalf("filtros: %d %s", r.status, r.rawBody)
 		}
 	})
+	// Frente B: a "Ave do dia" e os filtros Kids. Enquanto o conteúdo Kids
+	// não está no seed, não há ave elegível e a resposta é o 404 do contrato;
+	// depois dele, é a ave com a data de hoje.
+	t.Run("ave do dia", func(t *testing.T) {
+		r := get(t, base, "/v1/featured")
+		ok200 := r.status == 200 && r.body["date"] != nil && r.body["species"] != nil
+		ok404 := r.status == 404 && r.body["code"] == "FEATURED_NOT_FOUND"
+		if !ok200 && !ok404 {
+			t.Fatalf("ave do dia: %d %s", r.status, r.rawBody)
+		}
+	})
+	t.Run("filtros kids", func(t *testing.T) {
+		r := get(t, base, "/v1/filters?audience=kids")
+		if _, ok := r.body["primaryBiomes"].([]any); r.status != 200 || !ok {
+			t.Fatalf("filtros kids: %d %s", r.status, r.rawBody)
+		}
+	})
 	t.Run("catalog parado: stale para o que já foi visto, 503 para o resto", func(t *testing.T) {
 		_ = get(t, base, "/v1/species/turdus-rufiventris") // garante que está no cache
 		time.Sleep(2 * time.Second)                        // passa do frescor de 1s

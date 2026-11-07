@@ -14,13 +14,15 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/velosobr/passarim-bff/internal/adapter/media"
 	"github.com/velosobr/passarim-bff/internal/adapter/reqmeta"
 	"github.com/velosobr/passarim-bff/internal/domain"
+	"github.com/velosobr/passarim-bff/internal/usecase"
 )
 
-// As três interfaces abaixo descrevem só o que o handler precisa de cada
+// As quatro interfaces abaixo descrevem só o que o handler precisa de cada
 // caso de uso: um método Run. Os casos de uso do pacote usecase já as
 // satisfazem, e os testes as trocam por versões falsas.
 type SpeciesLister interface {
@@ -34,15 +36,21 @@ type SpeciesGetter interface {
 
 // FiltersLister é o caso de uso dos filtros.
 type FiltersLister interface {
-	Run(ctx context.Context) (domain.Filters, error)
+	Run(ctx context.Context, raw domain.RawFiltersQuery) (domain.Filters, error)
 }
 
-// Handler reúne o que as rotas usam: os três casos de uso, o montador de
+// FeaturedGetter é o caso de uso da "Ave do dia" (frente B).
+type FeaturedGetter interface {
+	Run(ctx context.Context) (usecase.FeaturedOutput, error)
+}
+
+// Handler reúne o que as rotas usam: os quatro casos de uso, o montador de
 // URLs de mídia, o logger e a função de prontidão.
 type Handler struct {
 	List     SpeciesLister
 	Get      SpeciesGetter
 	Filters  FiltersLister
+	Featured FeaturedGetter
 	Media    *media.Builder
 	Log      *slog.Logger
 	Ready    func() bool // nil = sempre pronto (false durante o shutdown)
@@ -65,6 +73,7 @@ func (h *Handler) Routes() http.Handler {
 	reg("GET /v1/species", h.listSpecies)
 	reg("GET /v1/species/{id}", h.getSpecies)
 	reg("GET /v1/filters", h.listFilters)
+	reg("GET /v1/featured", h.getFeatured)
 	reg("GET /healthz", h.healthz)
 	reg("GET /readyz", h.readyz)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { // 404 genérico em problem+json
@@ -75,7 +84,7 @@ func (h *Handler) Routes() http.Handler {
 
 // listParams são os parâmetros aceitos na lista, conferidos um a um para
 // achar repetições.
-var listParams = []string{"q", "biome", "state", "cursor", "limit"}
+var listParams = []string{"q", "biome", "state", "cursor", "limit", "audience", "primaryBiome"}
 
 // listSpecies atende GET /v1/species. query.Get pega só o primeiro valor de
 // cada parâmetro; query[p] traz todos, e é por ele que detectamos a
@@ -83,7 +92,8 @@ var listParams = []string{"q", "biome", "state", "cursor", "limit"}
 // parâmetro que o BFF repassa sem conseguir validar por completo.
 func (h *Handler) listSpecies(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	raw := domain.RawListQuery{Q: query.Get("q"), Biome: query.Get("biome"), State: query.Get("state"), Cursor: query.Get("cursor"), Limit: query.Get("limit")}
+	raw := domain.RawListQuery{Q: query.Get("q"), Biome: query.Get("biome"), State: query.Get("state"), Cursor: query.Get("cursor"), Limit: query.Get("limit"),
+		Audience: query.Get("audience"), PrimaryBiome: query.Get("primaryBiome")}
 	for _, p := range listParams {
 		if len(query[p]) > 1 {
 			raw.Repeated = append(raw.Repeated, p)
@@ -108,9 +118,14 @@ func (h *Handler) getSpecies(w http.ResponseWriter, r *http.Request) {
 	h.ok(w, r, toSpeciesDTO(r.Context(), s, h.Media))
 }
 
-// listFilters atende GET /v1/filters.
+// listFilters atende GET /v1/filters. O único parâmetro é a audiência.
 func (h *Handler) listFilters(w http.ResponseWriter, r *http.Request) {
-	f, err := h.Filters.Run(r.Context())
+	query := r.URL.Query()
+	raw := domain.RawFiltersQuery{Audience: query.Get("audience")}
+	if len(query["audience"]) > 1 {
+		raw.Repeated = append(raw.Repeated, "audience")
+	}
+	f, err := h.Filters.Run(r.Context(), raw)
 	if err != nil {
 		h.fail(w, r, err, "")
 		return
@@ -118,13 +133,40 @@ func (h *Handler) listFilters(w http.ResponseWriter, r *http.Request) {
 	h.ok(w, r, toFiltersDTO(f))
 }
 
-// ok escreve um 200 com os cabeçalhos de cache. O corpo é montado ANTES de
+// getFeatured atende GET /v1/featured, a "Ave do dia". Dois erros têm
+// tratamento próprio (spec da frente B, seção 7):
+//   - NotFound: nenhuma ave elegível; o app esconde o card;
+//   - InvalidArgument: o catalog recusou a data que o BFF calculou, o que só
+//     acontece com os relógios dos dois separados por mais de um dia. É bug
+//     do servidor, não do app: 500, com log.
+//
+// O resto (catalog fora do ar, Unimplemented) segue o fail de sempre.
+func (h *Handler) getFeatured(w http.ResponseWriter, r *http.Request) {
+	out, err := h.Featured.Run(r.Context())
+	switch kind := domain.KindOf(err); {
+	case err == nil:
+		h.write(w, r, toFeaturedDTO(r.Context(), out, h.Media), out.MaxAge)
+	case kind == domain.KindNotFound:
+		WriteProblem(w, r, http.StatusNotFound, CodeFeaturedNotFound, nil)
+	case kind == domain.KindInvalidArgument:
+		h.Log.ErrorContext(r.Context(), "catalog recusou a data da ave do dia: relógios fora de sincronia?",
+			"request_id", reqmeta.RequestID(r.Context()), "error", err)
+		WriteProblem(w, r, http.StatusInternalServerError, CodeInternal, nil)
+	default:
+		h.fail(w, r, err, "")
+	}
+}
+
+// ok escreve um 200 que o app e os proxies podem guardar por 60 s.
+func (h *Handler) ok(w http.ResponseWriter, r *http.Request, v any) { h.write(w, r, v, 60) }
+
+// write escreve um 200 com os cabeçalhos de cache. O corpo é montado ANTES de
 // escrever, para um erro de serialização nunca deixar uma resposta pela metade.
 //
 // Cabeçalhos: Cache-Control deixa o app e proxies guardarem a resposta por
-// 60 s; X-Cache conta se a resposta veio do cache do BFF (hit, miss, stale),
-// útil para depurar.
-func (h *Handler) ok(w http.ResponseWriter, r *http.Request, v any) {
+// maxAge segundos; X-Cache conta se a resposta veio do cache do BFF (hit,
+// miss, stale), útil para depurar.
+func (h *Handler) write(w http.ResponseWriter, r *http.Request, v any, maxAge int) {
 	body, err := json.Marshal(v)
 	if err != nil {
 		h.fail(w, r, err, "")
@@ -135,7 +177,7 @@ func (h *Handler) ok(w http.ResponseWriter, r *http.Request, v any) {
 		cache = "miss"
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(maxAge))
 	w.Header().Set("X-Cache", cache)
 	_, _ = w.Write(body)
 }

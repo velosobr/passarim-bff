@@ -5,6 +5,7 @@ package resilience_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -137,5 +138,24 @@ func TestRetry_StopsWhenContextIsCanceledDuringBackoff(t *testing.T) {
 	_, err := rd.GetSpecies(context.Background(), "x")
 	if domain.KindOf(err) != domain.KindCanceled || env.r.calls != 1 {
 		t.Fatalf("cancelado no backoff: err=%v calls=%d", err, env.r.calls)
+	}
+}
+
+// A "Ave do dia" passa pelo mesmo retry, com o próprio nome na métrica, e o
+// Unimplemented (catalog numa versão sem o método) não é repetido.
+func TestRetry_GetFeatured(t *testing.T) {
+	s, m := &scripted{errs: []error{kindErr(domain.KindUnavailable), nil}}, &recMetrics{}
+	rd := resilience.NewRetry(s, resilience.RetryConfig{MaxRetries: 2, AttemptTimeout: time.Second,
+		Sleep: func(context.Context, time.Duration) error { return nil }}, m)
+	if _, err := rd.GetFeatured(context.Background(), "2026-11-05"); err != nil || s.calls != 2 {
+		t.Fatalf("err=%v calls=%d", err, s.calls)
+	}
+	if fmt.Sprint(m.attempts) != "[GetFeatured:Unavailable GetFeatured:ok]" {
+		t.Fatalf("métricas: %v", m.attempts)
+	}
+	s = &scripted{errs: []error{kindErr(domain.KindUnimplemented)}}
+	rd = resilience.NewRetry(s, resilience.RetryConfig{MaxRetries: 2, AttemptTimeout: time.Second}, &recMetrics{})
+	if _, err := rd.GetFeatured(context.Background(), "2026-11-05"); domain.KindOf(err) != domain.KindUnimplemented || s.calls != 1 {
+		t.Fatalf("Unimplemented não se repete: err=%v calls=%d", err, s.calls)
 	}
 }

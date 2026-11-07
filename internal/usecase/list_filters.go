@@ -10,16 +10,21 @@ import (
 )
 
 // ListFilters busca as opções de filtro no catalog dentro do orçamento de
-// tempo. Não há parâmetros de entrada, então não há o que validar.
+// tempo. O único parâmetro é a audiência (frente B), validada antes de
+// qualquer chamada.
 type ListFilters struct {
 	Catalog CatalogReader
 	Budget  time.Duration
 }
 
-// Run aplica o orçamento e repassa a chamada à porta. O erro do catalog volta
-// como veio, já classificado com um Kind.
-func (u ListFilters) Run(ctx context.Context) (domain.Filters, error) {
+// Run valida a audiência, aplica o orçamento e repassa a chamada à porta. O
+// erro do catalog volta como veio, já classificado com um Kind.
+func (u ListFilters) Run(ctx context.Context, raw domain.RawFiltersQuery) (domain.Filters, error) {
+	q, err := domain.NewFiltersQuery(raw)
+	if err != nil {
+		return domain.Filters{}, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, u.Budget)
 	defer cancel()
-	return u.Catalog.ListFilters(ctx)
+	return u.Catalog.ListFilters(ctx, q)
 }

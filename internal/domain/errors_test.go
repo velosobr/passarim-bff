@@ -32,6 +32,7 @@ func TestKindTable(t *testing.T) {
 		{domain.KindInvalidArgument, false, false, false},
 		{domain.KindCanceled, false, false, false},
 		{domain.KindInternal, false, false, false},
+		{domain.KindUnimplemented, false, false, true},
 	}
 	for _, c := range cases {
 		if c.kind.Retryable() != c.retry || c.kind.CountsForBreaker() != c.breaker || c.kind.AllowsStale() != c.stale {

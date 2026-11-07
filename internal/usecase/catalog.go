@@ -7,7 +7,7 @@
 //
 // "Porta" é uma interface definida aqui, do lado de quem USA, e implementada
 // do lado de fora (nos adapters). Em Go, uma interface é satisfeita
-// implicitamente: qualquer tipo com estes três métodos já é um CatalogReader,
+// implicitamente: qualquer tipo com estes quatro métodos já é um CatalogReader,
 // sem declarar nada. Por isso os testes trocam o catalog real por um falso
 // com uma struct de poucas linhas.
 package usecase
@@ -25,6 +25,10 @@ type CatalogReader interface {
 	ListSpecies(ctx context.Context, q domain.ListQuery) (domain.SpeciesPage, error)
 	// GetSpecies devolve uma espécie completa, ou um erro KindNotFound.
 	GetSpecies(ctx context.Context, id string) (domain.Species, error)
-	// ListFilters devolve os biomas e as UFs que têm espécies, com as contagens.
-	ListFilters(ctx context.Context) (domain.Filters, error)
+	// ListFilters devolve os biomas, as UFs e os biomas principais que têm
+	// espécies, com as contagens, na audiência pedida.
+	ListFilters(ctx context.Context, q domain.FiltersQuery) (domain.Filters, error)
+	// GetFeatured devolve a "Ave do dia" da data (AAAA-MM-DD, fuso de São
+	// Paulo), ou um erro KindNotFound quando não há ave elegível.
+	GetFeatured(ctx context.Context, date string) (domain.Featured, error)
 }

@@ -1,6 +1,6 @@
 module github.com/velosobr/passarim-bff
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/getkin/kin-openapi v0.149.0
@@ -9,7 +9,7 @@ require (
 	github.com/sony/gobreaker/v2 v2.4.0
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.44.0
-	github.com/velosobr/passarim-proto v0.2.1
+	github.com/velosobr/passarim-proto v0.4.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.72.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0
 	go.opentelemetry.io/otel v1.47.0

@@ -29,6 +29,7 @@ type summaryJSON struct {
 	Common       string `json:"commonName"`
 	ThumbnailKey string `json:"thumbnailKey"`
 	Conservation string `json:"conservation"`
+	PrimaryBiome string `json:"primaryBiome"`
 }
 
 // pageJSON é uma página da lista gravada, com o cursor da próxima.
@@ -47,11 +48,25 @@ type photoJSON struct {
 	Credit creditJSON `json:"credit"`
 }
 
-// audioJSON é o canto gravado.
+// audioJSON é o canto gravado, com os picos da forma de onda.
 type audioJSON struct {
 	Key        string     `json:"key"`
 	DurationMs int        `json:"durationMs"`
 	Credit     creditJSON `json:"credit"`
+	Peaks      []float32  `json:"peaks"`
+}
+
+// kidsJSON é o conteúdo Kids gravado.
+type kidsJSON struct {
+	Description string   `json:"description"`
+	Facts       []string `json:"facts"`
+	DidYouKnow  string   `json:"didYouKnow"`
+}
+
+// featuredJSON é a "Ave do dia" gravada.
+type featuredJSON struct {
+	Species summaryJSON `json:"species"`
+	Audio   *audioJSON  `json:"audio"`
 }
 
 // factJSON é uma curiosidade gravada.
@@ -86,6 +101,8 @@ type speciesJSON struct {
 	Photos       []photoJSON   `json:"photos"`
 	Audio        *audioJSON    `json:"audio"`
 	Clusters     []clusterJSON `json:"clusters"`
+	PrimaryBiome string        `json:"primaryBiome"`
+	Kids         *kidsJSON     `json:"kids"`
 }
 
 // filtersJSON são os filtros gravados. As structs dentro da lista são
@@ -99,6 +116,13 @@ type filtersJSON struct {
 		State string `json:"state"`
 		Count int    `json:"count"`
 	} `json:"states"`
+	PrimaryBiomes []biomeCountJSON `json:"primaryBiomes"`
+}
+
+// biomeCountJSON é uma contagem por bioma principal gravada.
+type biomeCountJSON struct {
+	Biome string `json:"biome"`
+	Count int    `json:"count"`
 }
 
 // As funções xxxTo convertem do domínio para o DTO (na gravação) e as
@@ -110,10 +134,32 @@ func creditFrom(c creditJSON) domain.Credit {
 	return domain.Credit{Author: c.Author, License: c.License, Source: c.Source, SourceURL: c.SourceURL}
 }
 
+func summaryTo(s domain.Summary) summaryJSON {
+	return summaryJSON{s.ID, s.ScientificName, s.CommonName, s.ThumbnailKey, string(s.Conservation), string(s.PrimaryBiome)}
+}
+func summaryFrom(s summaryJSON) domain.Summary {
+	return domain.Summary{ID: s.ID, ScientificName: s.Scientific, CommonName: s.Common, ThumbnailKey: s.ThumbnailKey,
+		Conservation: domain.ConservationStatus(s.Conservation), PrimaryBiome: domain.Biome(s.PrimaryBiome)}
+}
+
+// audioTo e audioFrom convertem o canto; nil (sem canto) continua nil.
+func audioTo(a *domain.Audio) *audioJSON {
+	if a == nil {
+		return nil
+	}
+	return &audioJSON{a.Key, a.DurationMs, creditTo(a.Credit), a.Peaks}
+}
+func audioFrom(a *audioJSON) *domain.Audio {
+	if a == nil {
+		return nil
+	}
+	return &domain.Audio{Key: a.Key, DurationMs: a.DurationMs, Credit: creditFrom(a.Credit), Peaks: a.Peaks}
+}
+
 func pageTo(p domain.SpeciesPage) pageJSON {
 	out := pageJSON{NextCursor: p.NextCursor, Items: make([]summaryJSON, 0, len(p.Items))}
 	for _, s := range p.Items {
-		out.Items = append(out.Items, summaryJSON{s.ID, s.ScientificName, s.CommonName, s.ThumbnailKey, string(s.Conservation)})
+		out.Items = append(out.Items, summaryTo(s))
 	}
 	return out
 }
@@ -121,14 +167,25 @@ func pageTo(p domain.SpeciesPage) pageJSON {
 func pageFrom(p pageJSON) domain.SpeciesPage {
 	out := domain.SpeciesPage{NextCursor: p.NextCursor, Items: make([]domain.Summary, 0, len(p.Items))}
 	for _, s := range p.Items {
-		out.Items = append(out.Items, domain.Summary{ID: s.ID, ScientificName: s.Scientific, CommonName: s.Common, ThumbnailKey: s.ThumbnailKey, Conservation: domain.ConservationStatus(s.Conservation)})
+		out.Items = append(out.Items, summaryFrom(s))
 	}
 	return out
 }
 
+func featuredTo(f domain.Featured) featuredJSON {
+	return featuredJSON{Species: summaryTo(f.Species), Audio: audioTo(f.Audio)}
+}
+func featuredFrom(f featuredJSON) domain.Featured {
+	return domain.Featured{Species: summaryFrom(f.Species), Audio: audioFrom(f.Audio)}
+}
+
 func speciesTo(s domain.Species) speciesJSON {
 	out := speciesJSON{ID: s.ID, Scientific: s.ScientificName, Common: s.CommonName, Family: s.Family, SizeCm: s.SizeCm, Diet: s.Diet,
-		Conservation: string(s.Conservation), Description: s.Description, DescCredit: creditTo(s.DescriptionCredit), States: s.States}
+		Conservation: string(s.Conservation), Description: s.Description, DescCredit: creditTo(s.DescriptionCredit), States: s.States,
+		Audio: audioTo(s.Audio), PrimaryBiome: string(s.PrimaryBiome)}
+	if s.Kids != nil {
+		out.Kids = &kidsJSON{s.Kids.Description, s.Kids.Facts, s.Kids.DidYouKnow}
+	}
 	for _, f := range s.Facts {
 		out.Facts = append(out.Facts, factJSON{f.Text, f.Source})
 	}
@@ -138,9 +195,6 @@ func speciesTo(s domain.Species) speciesJSON {
 	for _, p := range s.Photos {
 		out.Photos = append(out.Photos, photoJSON{p.ThumbKey, p.MediumKey, p.LargeKey, p.Width, p.Height, creditTo(p.Credit)})
 	}
-	if s.Audio != nil {
-		out.Audio = &audioJSON{s.Audio.Key, s.Audio.DurationMs, creditTo(s.Audio.Credit)}
-	}
 	for _, c := range s.Clusters {
 		out.Clusters = append(out.Clusters, clusterJSON{c.Lat, c.Lng, c.Count, c.Precision})
 	}
@@ -149,7 +203,11 @@ func speciesTo(s domain.Species) speciesJSON {
 
 func speciesFrom(s speciesJSON) domain.Species {
 	out := domain.Species{ID: s.ID, ScientificName: s.Scientific, CommonName: s.Common, Family: s.Family, SizeCm: s.SizeCm, Diet: s.Diet,
-		Conservation: domain.ConservationStatus(s.Conservation), Description: s.Description, DescriptionCredit: creditFrom(s.DescCredit), States: s.States}
+		Conservation: domain.ConservationStatus(s.Conservation), Description: s.Description, DescriptionCredit: creditFrom(s.DescCredit), States: s.States,
+		Audio: audioFrom(s.Audio), PrimaryBiome: domain.Biome(s.PrimaryBiome)}
+	if s.Kids != nil {
+		out.Kids = &domain.KidsContent{Description: s.Kids.Description, Facts: s.Kids.Facts, DidYouKnow: s.Kids.DidYouKnow}
+	}
 	for _, f := range s.Facts {
 		out.Facts = append(out.Facts, domain.Fact{Text: f.Text, Source: f.Source})
 	}
@@ -158,9 +216,6 @@ func speciesFrom(s speciesJSON) domain.Species {
 	}
 	for _, p := range s.Photos {
 		out.Photos = append(out.Photos, domain.Photo{ThumbKey: p.Thumb, MediumKey: p.Medium, LargeKey: p.Large, Width: p.Width, Height: p.Height, Credit: creditFrom(p.Credit)})
-	}
-	if s.Audio != nil {
-		out.Audio = &domain.Audio{Key: s.Audio.Key, DurationMs: s.Audio.DurationMs, Credit: creditFrom(s.Audio.Credit)}
 	}
 	for _, c := range s.Clusters {
 		out.Clusters = append(out.Clusters, domain.Cluster{Lat: c.Lat, Lng: c.Lng, Count: c.Count, Precision: c.Precision})
@@ -182,6 +237,9 @@ func filtersTo(f domain.Filters) filtersJSON {
 			Count int    `json:"count"`
 		}{s.State, s.SpeciesCount})
 	}
+	for _, b := range f.PrimaryBiomes {
+		out.PrimaryBiomes = append(out.PrimaryBiomes, biomeCountJSON{string(b.Biome), b.SpeciesCount})
+	}
 	return out
 }
 
@@ -192,6 +250,9 @@ func filtersFrom(f filtersJSON) domain.Filters {
 	}
 	for _, s := range f.States {
 		out.States = append(out.States, domain.StateCount{State: s.State, SpeciesCount: s.Count})
+	}
+	for _, b := range f.PrimaryBiomes {
+		out.PrimaryBiomes = append(out.PrimaryBiomes, domain.BiomeCount{Biome: domain.Biome(b.Biome), SpeciesCount: b.Count})
 	}
 	return out
 }

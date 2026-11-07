@@ -38,15 +38,18 @@ func (s *scripted) next(ctx context.Context) error {
 	return nil
 }
 
-// Os três métodos só consomem o roteiro.
+// Os quatro métodos só consomem o roteiro.
 func (s *scripted) ListSpecies(ctx context.Context, _ domain.ListQuery) (domain.SpeciesPage, error) {
 	return domain.SpeciesPage{}, s.next(ctx)
 }
 func (s *scripted) GetSpecies(ctx context.Context, id string) (domain.Species, error) {
 	return domain.Species{ID: id}, s.next(ctx)
 }
-func (s *scripted) ListFilters(ctx context.Context) (domain.Filters, error) {
+func (s *scripted) ListFilters(ctx context.Context, _ domain.FiltersQuery) (domain.Filters, error) {
 	return domain.Filters{}, s.next(ctx)
+}
+func (s *scripted) GetFeatured(ctx context.Context, _ string) (domain.Featured, error) {
+	return domain.Featured{}, s.next(ctx)
 }
 
 // kindErr cria um erro do domínio com o Kind pedido e sem causa.

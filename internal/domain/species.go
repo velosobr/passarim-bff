@@ -23,11 +23,23 @@ type Photo struct {
 	Credit                        Credit
 }
 
-// Audio é a gravação do canto, com a duração em milissegundos.
+// Audio é a gravação do canto, com a duração em milissegundos. Peaks são
+// os 64 picos da forma de onda, de 0 a 1, que o player desenha (frente B);
+// vazio num canto gravado antes de o catalog calcular os picos.
 type Audio struct {
 	Key        string
 	DurationMs int
 	Credit     Credit
+	Peaks      []float32
+}
+
+// KidsContent é o texto para crianças da espécie (frente B), gerado a partir
+// do texto adulto e revisado por uma pessoa no catalog. Os fatos chegam só
+// com o texto: de qual fato adulto cada um saiu não interessa ao app.
+type KidsContent struct {
+	Description string
+	Facts       []string
+	DidYouKnow  string
 }
 
 // Fact é uma curiosidade sobre a espécie, com a fonte de onde ela saiu.
@@ -49,6 +61,7 @@ type Summary struct {
 	ID, ScientificName, CommonName string
 	ThumbnailKey                   string // vazio = ainda sem foto
 	Conservation                   ConservationStatus
+	PrimaryBiome                   Biome // o "mundo" da ave no Kids; vazio = sem bioma principal
 }
 
 // SpeciesPage é uma página da lista. A paginação é por cursor: para buscar a
@@ -77,6 +90,8 @@ type Species struct {
 	Photos                                 []Photo
 	Audio                                  *Audio
 	Clusters                               []Cluster
+	PrimaryBiome                           Biome        // o "mundo" da ave no Kids; vazio = sem bioma principal
+	Kids                                   *KidsContent // nil = a espécie ainda não tem conteúdo Kids
 }
 
 // BiomeCount diz quantas espécies existem num bioma (usado nos filtros).
@@ -93,7 +108,18 @@ type StateCount struct {
 
 // Filters são as opções da tela de filtros: só os biomas e as UFs que têm
 // pelo menos uma espécie, cada um com a contagem.
+//
+// PrimaryBiomes conta por bioma principal, o "mundo" de cada ave no Kids: é
+// a conta do álbum ("4 de 9" no Pantanal).
 type Filters struct {
-	Biomes []BiomeCount
-	States []StateCount
+	Biomes        []BiomeCount
+	States        []StateCount
+	PrimaryBiomes []BiomeCount
+}
+
+// Featured é a "Ave do dia" que o catalog escolheu: o resumo (o card) e o
+// canto, nil quando a ave não tem canto.
+type Featured struct {
+	Species Summary
+	Audio   *Audio
 }

@@ -31,20 +31,26 @@ import (
 
 // stubCatalog é o "catalog" por baixo dos casos de uso REAIS: cada cenário escolhe o que ele devolve.
 type stubCatalog struct {
-	page    domain.SpeciesPage
-	species domain.Species
-	filters domain.Filters
-	err     error
+	page     domain.SpeciesPage
+	species  domain.Species
+	filters  domain.Filters
+	featured domain.Featured
+	err      error
 }
 
-// Os três métodos devolvem o que o cenário configurou.
+// Os quatro métodos devolvem o que o cenário configurou.
 func (s *stubCatalog) ListSpecies(context.Context, domain.ListQuery) (domain.SpeciesPage, error) {
 	return s.page, s.err
 }
 func (s *stubCatalog) GetSpecies(context.Context, string) (domain.Species, error) {
 	return s.species, s.err
 }
-func (s *stubCatalog) ListFilters(context.Context) (domain.Filters, error) { return s.filters, s.err }
+func (s *stubCatalog) ListFilters(context.Context, domain.FiltersQuery) (domain.Filters, error) {
+	return s.filters, s.err
+}
+func (s *stubCatalog) GetFeatured(context.Context, string) (domain.Featured, error) {
+	return s.featured, s.err
+}
 
 // Garante, na compilação, que o stub satisfaz a porta.
 var _ usecase.CatalogReader = (*stubCatalog)(nil)
@@ -62,7 +68,9 @@ func stack(t *testing.T, cat usecase.CatalogReader, burst int) (http.Handler, *h
 		List:    usecase.ListSpecies{Catalog: cat, Budget: time.Second},
 		Get:     usecase.GetSpecies{Catalog: cat, Budget: time.Second},
 		Filters: usecase.ListFilters{Catalog: cat, Budget: time.Second},
-		Media:   m, Log: log,
+		Featured: usecase.GetFeatured{Catalog: cat, Budget: time.Second,
+			Now: func() time.Time { return time.Date(2026, 11, 5, 15, 0, 0, 0, time.UTC) }},
+		Media: m, Log: log,
 	}
 	ip := func(*http.Request) string { return "203.0.113.9" }
 	rl := middleware.NewRateLimiter(middleware.RateLimitConfig{RPS: 1, Burst: burst, MaxIPs: 10, IdleAfter: time.Minute}, ip, time.Now)
@@ -118,8 +126,11 @@ func fullSpecies() domain.Species {
 		States:            []string{"SP"},
 		Photos: []domain.Photo{{ThumbKey: "species/t/photo-1-thumb.webp", MediumKey: "species/t/photo-1-medium.webp", LargeKey: "species/t/photo-1-large.webp",
 			Width: 1600, Height: 1067, Credit: domain.Credit{Author: "Fulano", License: "CC-BY-NC", Source: "inaturalist", SourceURL: "https://www.inaturalist.org/photos/1"}}},
-		Audio:    &domain.Audio{Key: "species/t/audio-9.aac", DurationMs: 21500, Credit: domain.Credit{Author: "B", License: "CC-BY-NC-SA", Source: "xeno-canto", SourceURL: "https://xeno-canto.org/9"}},
-		Clusters: []domain.Cluster{{Lat: -23.5, Lng: -46.6, Count: 42, Precision: 0.5}},
+		Audio: &domain.Audio{Key: "species/t/audio-9.aac", DurationMs: 21500, Credit: domain.Credit{Author: "B", License: "CC-BY-NC-SA", Source: "xeno-canto", SourceURL: "https://xeno-canto.org/9"},
+			Peaks: []float32{0, 0.25, 1}},
+		Clusters:     []domain.Cluster{{Lat: -23.5, Lng: -46.6, Count: 42, Precision: 0.5}},
+		PrimaryBiome: domain.BiomeMataAtlantica,
+		Kids:         &domain.KidsContent{Description: "O sabiá é laranja. Ele canta.", Facts: []string{"Ele imita outras aves."}, DidYouKnow: "Ele acorda cedo."},
 	}
 }
 
@@ -159,6 +170,17 @@ func TestContract_ResponsesMatchOpenAPI(t *testing.T) {
 		{"detalhe só com o mínimo 200 (nulos e listas vazias)", "GET", "/v1/species/x", &stubCatalog{species: domain.Species{ID: "x"}}, 200, false},
 		{"filtros 200", "GET", "/v1/filters", &stubCatalog{filters: domain.Filters{
 			Biomes: []domain.BiomeCount{{Biome: domain.BiomePampa, SpeciesCount: 3}}, States: []domain.StateCount{{State: "RS", SpeciesCount: 5}}}}, 200, false},
+		{"filtros kids 200", "GET", "/v1/filters?audience=kids", &stubCatalog{filters: domain.Filters{
+			PrimaryBiomes: []domain.BiomeCount{{Biome: domain.BiomeCerrado, SpeciesCount: 4}}}}, 200, false},
+		{"lista kids 200", "GET", "/v1/species?audience=kids&primaryBiome=pampa", &stubCatalog{page: domain.SpeciesPage{Items: []domain.Summary{
+			{ID: "a", CommonName: "A", ScientificName: "A a", PrimaryBiome: domain.BiomePampa}}}}, 200, false},
+		{"400 audiência inválida", "GET", "/v1/filters?audience=todos", &stubCatalog{}, 400, false},
+		{"ave do dia 200", "GET", "/v1/featured", &stubCatalog{featured: domain.Featured{
+			Species: domain.Summary{ID: "t", CommonName: "Sabiá", ScientificName: "Turdus rufiventris", PrimaryBiome: domain.BiomeMataAtlantica},
+			Audio:   &domain.Audio{Key: "species/t/a.aac", DurationMs: 3000, Peaks: []float32{0.5}}}}, 200, false},
+		{"ave do dia sem canto 200", "GET", "/v1/featured", &stubCatalog{featured: domain.Featured{Species: domain.Summary{ID: "t"}}}, 200, false},
+		{"404 sem ave do dia", "GET", "/v1/featured", &stubCatalog{err: domain.NewError(domain.KindNotFound, errors.New("x"))}, 404, false},
+		{"503 catalog sem o método", "GET", "/v1/featured", &stubCatalog{err: domain.NewError(domain.KindUnimplemented, errors.New("x"))}, 503, false},
 		{"400 parâmetros inválidos", "GET", "/v1/species?limit=999&state=XX&biome=deserto", &stubCatalog{}, 400, false},
 		{"400 id inválido", "GET", "/v1/species/ABC_def", &stubCatalog{}, 400, false},
 		{"404 espécie", "GET", "/v1/species/nao-existe", &stubCatalog{err: domain.NewError(domain.KindNotFound, errors.New("x"))}, 404, false},
@@ -223,7 +245,9 @@ func TestContract_Panic500(t *testing.T) {
 // panicCatalog é um catalog que entra em pânico ao listar os filtros.
 type panicCatalog struct{ *stubCatalog }
 
-func (panicCatalog) ListFilters(context.Context) (domain.Filters, error) { panic("boom") }
+func (panicCatalog) ListFilters(context.Context, domain.FiltersQuery) (domain.Filters, error) {
+	panic("boom")
+}
 
 // Toda rota registrada precisa estar documentada: esquecer de atualizar o openapi.yaml quebra o CI.
 func TestContract_EveryRegisteredRouteIsDocumented(t *testing.T) {

@@ -116,3 +116,16 @@ func TestBreaker_WrapsErrorsAsCircuitOpenKind(t *testing.T) {
 		t.Fatalf("CircuitOpen libera stale e não conta no breaker: %s", k)
 	}
 }
+
+// A "Ave do dia" usa o mesmo breaker das outras chamadas: falhas dela abrem
+// o circuito para todas, porque o catalog é um só.
+func TestBreaker_GetFeaturedSharesTheBreaker(t *testing.T) {
+	s, m := &scripted{errs: []error{kindErr(domain.KindUnavailable)}}, &recMetrics{}
+	b := resilience.NewBreaker(s, fastBreaker(), testLogger(), m)
+	for range 5 {
+		_, _ = b.GetFeatured(context.Background(), "2026-11-05")
+	}
+	if _, err := b.GetSpecies(context.Background(), "x"); domain.KindOf(err) != domain.KindCircuitOpen || s.calls != 5 {
+		t.Fatalf("o circuito deveria estar aberto: err=%v calls=%d", err, s.calls)
+	}
+}

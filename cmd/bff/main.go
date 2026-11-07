@@ -164,13 +164,15 @@ func run(getenv func(string) string) error {
 	// Readiness diz ao /readyz se o BFF aceita tráfego. O servidor o desliga
 	// no começo do desligamento, para o balanceador parar de mandar pedidos.
 	ready := &server.Readiness{}
-	// Os três casos de uso recebem o reader já decorado e o orçamento de
-	// tempo de cada requisição (REQUEST_BUDGET).
+	// Os quatro casos de uso recebem o reader já decorado e o orçamento de
+	// tempo de cada requisição (REQUEST_BUDGET). A "Ave do dia" também
+	// recebe o relógio: é por ele que o BFF sabe a data em São Paulo.
 	h := &httpadapter.Handler{
-		List:    usecase.ListSpecies{Catalog: reader, Budget: cfg.RequestBudget},
-		Get:     usecase.GetSpecies{Catalog: reader, Budget: cfg.RequestBudget},
-		Filters: usecase.ListFilters{Catalog: reader, Budget: cfg.RequestBudget},
-		Media:   mediaURLs, Log: log, Ready: ready.Ready,
+		List:     usecase.ListSpecies{Catalog: reader, Budget: cfg.RequestBudget},
+		Get:      usecase.GetSpecies{Catalog: reader, Budget: cfg.RequestBudget},
+		Filters:  usecase.ListFilters{Catalog: reader, Budget: cfg.RequestBudget},
+		Featured: usecase.GetFeatured{Catalog: reader, Budget: cfg.RequestBudget, Now: time.Now},
+		Media:    mediaURLs, Log: log, Ready: ready.Ready,
 	}
 
 	// Descobre o IP real do cliente: atrás do Traefik, o IP da conexão é o do

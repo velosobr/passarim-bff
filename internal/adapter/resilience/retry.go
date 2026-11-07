@@ -119,7 +119,7 @@ func do[T any](ctx context.Context, r *retry, method string, fn func(context.Con
 	}
 }
 
-// Os três métodos fazem do retry um CatalogReader: cada um só dá nome à
+// Os quatro métodos fazem do retry um CatalogReader: cada um só dá nome à
 // operação (usado nas métricas) e chama do.
 func (r *retry) ListSpecies(ctx context.Context, q domain.ListQuery) (domain.SpeciesPage, error) {
 	return do(ctx, r, "ListSpecies", func(c context.Context) (domain.SpeciesPage, error) { return r.next.ListSpecies(c, q) })
@@ -129,6 +129,10 @@ func (r *retry) GetSpecies(ctx context.Context, id string) (domain.Species, erro
 	return do(ctx, r, "GetSpecies", func(c context.Context) (domain.Species, error) { return r.next.GetSpecies(c, id) })
 }
 
-func (r *retry) ListFilters(ctx context.Context) (domain.Filters, error) {
-	return do(ctx, r, "ListFilters", func(c context.Context) (domain.Filters, error) { return r.next.ListFilters(c) })
+func (r *retry) ListFilters(ctx context.Context, q domain.FiltersQuery) (domain.Filters, error) {
+	return do(ctx, r, "ListFilters", func(c context.Context) (domain.Filters, error) { return r.next.ListFilters(c, q) })
+}
+
+func (r *retry) GetFeatured(ctx context.Context, date string) (domain.Featured, error) {
+	return do(ctx, r, "GetFeatured", func(c context.Context) (domain.Featured, error) { return r.next.GetFeatured(c, date) })
 }

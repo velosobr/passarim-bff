@@ -16,8 +16,9 @@ const statusClientClosed = 499
 
 // fail é o ÚNICO lugar que traduz erro de domínio em resposta HTTP.
 // O mapa é: inválido → 400; não encontrado → 404; cliente desistiu → 499
-// (sem corpo); catalog com problema → 503; o resto → 500. Os 503 e 500 são
-// registrados no log com a causa, que nunca vai para a resposta.
+// (sem corpo); catalog com problema ou numa versão sem o método → 503; o
+// resto → 500. Os 503 e 500 são registrados no log com a causa, que nunca
+// vai para a resposta.
 //
 // fieldHint diz qual parâmetro apontar quando o CATALOG reclama de InvalidArgument
 // ("cursor" na lista, "id" no detalhe); nunca repassamos a mensagem dele.
@@ -37,7 +38,7 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error, fieldH
 		WriteProblem(w, r, http.StatusNotFound, CodeSpeciesNotFound, nil)
 	case domain.KindCanceled:
 		w.WriteHeader(statusClientClosed) // sem corpo: ninguém está ouvindo
-	case domain.KindUnavailable, domain.KindTimeout, domain.KindUpstream, domain.KindCircuitOpen:
+	case domain.KindUnavailable, domain.KindTimeout, domain.KindUpstream, domain.KindCircuitOpen, domain.KindUnimplemented:
 		h.Log.WarnContext(r.Context(), "catalog indisponível", "request_id", rid, "kind", kind.String(), "error", err)
 		WriteProblem(w, r, http.StatusServiceUnavailable, CodeServiceUnavailable, nil)
 	default:
